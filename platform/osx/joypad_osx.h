@@ -1,11 +1,12 @@
 /*************************************************************************/
-/*  joypad_osx.h                                                     */
+/*  joypad_osx.h                                                         */
 /*************************************************************************/
 /*                       This file is part of:                           */
 /*                           GODOT ENGINE                                */
-/*                    http://www.godotengine.org                         */
+/*                      https://godotengine.org                          */
 /*************************************************************************/
-/* Copyright (c) 2007-2017 Juan Linietsky, Ariel Manzur.                 */
+/* Copyright (c) 2007-2021 Juan Linietsky, Ariel Manzur.                 */
+/* Copyright (c) 2014-2021 Godot Engine contributors (cf. AUTHORS.md).   */
 /*                                                                       */
 /* Permission is hereby granted, free of charge, to any person obtaining */
 /* a copy of this software and associated documentation files (the       */
@@ -26,6 +27,7 @@
 /* TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE     */
 /* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                */
 /*************************************************************************/
+
 #ifndef JOYPADOSX_H
 #define JOYPADOSX_H
 
@@ -34,20 +36,20 @@
 #else
 #include <Kernel/IOKit/hidsystem/IOHIDUsageTables.h>
 #endif
-#include <IOKit/hid/IOHIDLib.h>
 #include <ForceFeedback/ForceFeedback.h>
 #include <ForceFeedback/ForceFeedbackConstants.h>
+#include <IOKit/hid/IOHIDLib.h>
 
-#include "main/input_default.h"
+#include "core/input/input.h"
 
 struct rec_element {
 	IOHIDElementRef ref;
 	IOHIDElementCookie cookie;
 
-	uint32_t usage;
+	uint32_t usage = 0;
 
-	int min;
-	int max;
+	int min = 0;
+	int max = 0;
 
 	struct Comparator {
 		bool operator()(const rec_element p_a, const rec_element p_b) const { return p_a.usage < p_b.usage; }
@@ -55,22 +57,22 @@ struct rec_element {
 };
 
 struct joypad {
-	IOHIDDeviceRef device_ref;
+	IOHIDDeviceRef device_ref = nullptr;
 
 	Vector<rec_element> axis_elements;
 	Vector<rec_element> button_elements;
 	Vector<rec_element> hat_elements;
 
-	int id;
+	int id = 0;
 
-	io_service_t ffservice;     /* Interface for force feedback, 0 = no ff */
+	io_service_t ffservice = 0; /* Interface for force feedback, 0 = no ff */
 	FFCONSTANTFORCE ff_constant_force;
 	FFDeviceObjectReference ff_device;
 	FFEffectObjectReference ff_object;
-	uint64_t ff_timestamp;
-	LONG *ff_directions;
+	uint64_t ff_timestamp = 0;
+	LONG *ff_directions = nullptr;
 	FFEFFECT ff_effect;
-	DWORD *ff_axes;
+	DWORD *ff_axes = nullptr;
 
 	void add_hid_elements(CFArrayRef p_array);
 	void add_hid_element(IOHIDElementRef p_element);
@@ -86,24 +88,21 @@ struct joypad {
 };
 
 class JoypadOSX {
-
 	enum {
 		JOYPADS_MAX = 16,
 	};
 
 private:
-	InputDefault *input;
+	Input *input;
 	IOHIDManagerRef hid_manager;
 
-	bool attached_devices[JOYPADS_MAX];
 	Vector<joypad> device_list;
 
 	bool have_device(IOHIDDeviceRef p_device) const;
 	bool configure_joypad(IOHIDDeviceRef p_device_ref, joypad *p_joy);
 
-
-	int get_free_joy_id();
 	int get_joy_index(int p_id) const;
+	int get_joy_ref(IOHIDDeviceRef p_device) const;
 
 	void poll_joypads() const;
 	void setup_joypad_objects();
@@ -113,12 +112,12 @@ private:
 	void joypad_vibration_stop(int p_id, uint64_t p_timestamp);
 
 public:
-	uint32_t process_joypads(uint32_t p_last_id);
+	void process_joypads();
 
 	void _device_added(IOReturn p_res, IOHIDDeviceRef p_device);
-	void _device_removed(int p_id);
+	void _device_removed(IOReturn p_res, IOHIDDeviceRef p_device);
 
-	JoypadOSX();
+	JoypadOSX(Input *in);
 	~JoypadOSX();
 };
 

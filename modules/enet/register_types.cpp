@@ -3,9 +3,10 @@
 /*************************************************************************/
 /*                       This file is part of:                           */
 /*                           GODOT ENGINE                                */
-/*                    http://www.godotengine.org                         */
+/*                      https://godotengine.org                          */
 /*************************************************************************/
-/* Copyright (c) 2007-2017 Juan Linietsky, Ariel Manzur.                 */
+/* Copyright (c) 2007-2021 Juan Linietsky, Ariel Manzur.                 */
+/* Copyright (c) 2014-2021 Godot Engine contributors (cf. AUTHORS.md).   */
 /*                                                                       */
 /* Permission is hereby granted, free of charge, to any person obtaining */
 /* a copy of this software and associated documentation files (the       */
@@ -26,26 +27,25 @@
 /* TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE     */
 /* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                */
 /*************************************************************************/
+
 #include "register_types.h"
-#include "error_macros.h"
+#include "core/error/error_macros.h"
 #include "networked_multiplayer_enet.h"
 
-static bool enet_ok=false;
+static bool enet_ok = false;
 
 void register_enet_types() {
-
-	if (enet_initialize() !=0 ) {
+	if (enet_initialize() != 0) {
 		ERR_PRINT("ENet initialization failure");
 	} else {
-		enet_ok=true;
+		enet_ok = true;
 	}
 
 	ClassDB::register_class<NetworkedMultiplayerENet>();
 }
 
 void unregister_enet_types() {
-
-	if (enet_ok)
+	if (enet_ok) {
 		enet_deinitialize();
-
+	}
 }

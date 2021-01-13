@@ -3,9 +3,10 @@
 /*************************************************************************/
 /*                       This file is part of:                           */
 /*                           GODOT ENGINE                                */
-/*                    http://www.godotengine.org                         */
+/*                      https://godotengine.org                          */
 /*************************************************************************/
-/* Copyright (c) 2007-2017 Juan Linietsky, Ariel Manzur.                 */
+/* Copyright (c) 2007-2021 Juan Linietsky, Ariel Manzur.                 */
+/* Copyright (c) 2014-2021 Godot Engine contributors (cf. AUTHORS.md).   */
 /*                                                                       */
 /* Permission is hereby granted, free of charge, to any person obtaining */
 /* a copy of this software and associated documentation files (the       */
@@ -26,52 +27,45 @@
 /* TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE     */
 /* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                */
 /*************************************************************************/
+
 #include "audio_driver_xaudio2.h"
 
-#include "globals.h"
-#include "os/os.h"
+#include "core/config/project_settings.h"
+#include "core/os/os.h"
 
-const char * AudioDriverXAudio2::get_name() const
-{
+const char *AudioDriverXAudio2::get_name() const {
 	return "XAudio2";
 }
 
 Error AudioDriverXAudio2::init() {
-
 	active = false;
 	thread_exited = false;
 	exit_thread = false;
 	pcm_open = false;
-	samples_in = NULL;
+	samples_in = nullptr;
 
-
-	mix_rate = 48000;
+	mix_rate = GLOBAL_GET("audio/mix_rate");
 	// FIXME: speaker_mode seems unused in the Xaudio2 driver so far
 	speaker_mode = SPEAKER_MODE_STEREO;
 	channels = 2;
 
-	int latency = GLOBAL_DEF("audio/output_latency", 25);
-	buffer_size = nearest_power_of_2(latency * mix_rate / 1000);
+	int latency = GLOBAL_GET("audio/output_latency");
+	buffer_size = closest_power_of_2(latency * mix_rate / 1000);
 
-	samples_in = memnew_arr(int32_t, buffer_size*channels);
+	samples_in = memnew_arr(int32_t, buffer_size * channels);
 	for (int i = 0; i < AUDIO_BUFFERS; i++) {
-		samples_out[i] = memnew_arr(int16_t, buffer_size*channels);
+		samples_out[i] = memnew_arr(int16_t, buffer_size * channels);
 		xaudio_buffer[i].AudioBytes = buffer_size * channels * sizeof(int16_t);
-		xaudio_buffer[i].pAudioData = (const BYTE*)(samples_out[i]);
+		xaudio_buffer[i].pAudioData = (const BYTE *)(samples_out[i]);
 		xaudio_buffer[i].Flags = 0;
 	}
 
 	HRESULT hr;
 	hr = XAudio2Create(&xaudio, 0, XAUDIO2_DEFAULT_PROCESSOR);
-	if (hr != S_OK) {
-		ERR_EXPLAIN("Error creating XAudio2 engine.");
-		ERR_FAIL_V(ERR_UNAVAILABLE);
-	}
+	ERR_FAIL_COND_V_MSG(hr != S_OK, ERR_UNAVAILABLE, "Error creating XAudio2 engine.");
+
 	hr = xaudio->CreateMasteringVoice(&mastering_voice);
-	if (hr != S_OK) {
-		ERR_EXPLAIN("Error creating XAudio2 mastering voice.");
-		ERR_FAIL_V(ERR_UNAVAILABLE);
-	}
+	ERR_FAIL_COND_V_MSG(hr != S_OK, ERR_UNAVAILABLE, "Error creating XAudio2 mastering voice.");
 
 	wave_format.nChannels = channels;
 	wave_format.cbSize = 0;
@@ -82,88 +76,66 @@ Error AudioDriverXAudio2::init() {
 	wave_format.nAvgBytesPerSec = mix_rate * wave_format.nBlockAlign;
 
 	hr = xaudio->CreateSourceVoice(&source_voice, &wave_format, 0, XAUDIO2_MAX_FREQ_RATIO, &voice_callback);
-	if (hr != S_OK) {
-		ERR_EXPLAIN("Error creating XAudio2 source voice. " + itos(hr));
-		ERR_FAIL_V(ERR_UNAVAILABLE);
-	}
+	ERR_FAIL_COND_V_MSG(hr != S_OK, ERR_UNAVAILABLE, "Error creating XAudio2 source voice. Error code: " + itos(hr) + ".");
 
-	mutex = Mutex::create();
 	thread = Thread::create(AudioDriverXAudio2::thread_func, this);
 
 	return OK;
-};
+}
 
-void AudioDriverXAudio2::thread_func(void* p_udata) {
-
-	AudioDriverXAudio2* ad = (AudioDriverXAudio2*)p_udata;
-
-	uint64_t usdelay = (ad->buffer_size / float(ad->mix_rate)) * 1000000;
+void AudioDriverXAudio2::thread_func(void *p_udata) {
+	AudioDriverXAudio2 *ad = (AudioDriverXAudio2 *)p_udata;
 
 	while (!ad->exit_thread) {
-
-
 		if (!ad->active) {
-
 			for (int i = 0; i < AUDIO_BUFFERS; i++) {
 				ad->xaudio_buffer[i].Flags = XAUDIO2_END_OF_STREAM;
 			}
 
 		} else {
-
 			ad->lock();
 
 			ad->audio_server_process(ad->buffer_size, ad->samples_in);
 
 			ad->unlock();
 
-			for (unsigned int i = 0;i < ad->buffer_size*ad->channels;i++) {
-
+			for (unsigned int i = 0; i < ad->buffer_size * ad->channels; i++) {
 				ad->samples_out[ad->current_buffer][i] = ad->samples_in[i] >> 16;
 			}
 
 			ad->xaudio_buffer[ad->current_buffer].Flags = 0;
 			ad->xaudio_buffer[ad->current_buffer].AudioBytes = ad->buffer_size * ad->channels * sizeof(int16_t);
-			ad->xaudio_buffer[ad->current_buffer].pAudioData = (const BYTE*)(ad->samples_out[ad->current_buffer]);
+			ad->xaudio_buffer[ad->current_buffer].pAudioData = (const BYTE *)(ad->samples_out[ad->current_buffer]);
 			ad->xaudio_buffer[ad->current_buffer].PlayBegin = 0;
 			ad->source_voice->SubmitSourceBuffer(&(ad->xaudio_buffer[ad->current_buffer]));
 
 			ad->current_buffer = (ad->current_buffer + 1) % AUDIO_BUFFERS;
 
 			XAUDIO2_VOICE_STATE state;
-			while (ad->source_voice->GetState(&state), state.BuffersQueued > AUDIO_BUFFERS - 1)
-			{
+			while (ad->source_voice->GetState(&state), state.BuffersQueued > AUDIO_BUFFERS - 1) {
 				WaitForSingleObject(ad->voice_callback.buffer_end_event, INFINITE);
 			}
 		}
-
-	};
+	}
 
 	ad->thread_exited = true;
-
-};
+}
 
 void AudioDriverXAudio2::start() {
-
 	active = true;
 	HRESULT hr = source_voice->Start(0);
-	if (hr != S_OK) {
-		ERR_EXPLAIN("XAudio2 start error " + itos(hr));
-		ERR_FAIL();
-	}
-};
+	ERR_FAIL_COND_MSG(hr != S_OK, "Error starting XAudio2 driver. Error code: " + itos(hr) + ".");
+}
 
 int AudioDriverXAudio2::get_mix_rate() const {
-
 	return mix_rate;
-};
+}
 
 AudioDriver::SpeakerMode AudioDriverXAudio2::get_speaker_mode() const {
-
 	return speaker_mode;
-};
+}
 
 float AudioDriverXAudio2::get_latency() {
-
 	XAUDIO2_PERFORMANCE_DATA perf_data;
 	xaudio->GetPerformanceData(&perf_data);
 	if (perf_data.CurrentLatencyInSamples) {
@@ -174,20 +146,18 @@ float AudioDriverXAudio2::get_latency() {
 }
 
 void AudioDriverXAudio2::lock() {
-
-	if (!thread || !mutex)
+	if (!thread)
 		return;
-	mutex->lock();
-};
+	mutex.lock();
+}
+
 void AudioDriverXAudio2::unlock() {
-
-	if (!thread || !mutex)
+	if (!thread)
 		return;
-	mutex->unlock();
-};
+	mutex.unlock();
+}
 
 void AudioDriverXAudio2::finish() {
-
 	if (!thread)
 		return;
 
@@ -201,36 +171,22 @@ void AudioDriverXAudio2::finish() {
 
 	if (samples_in) {
 		memdelete_arr(samples_in);
-	};
+	}
 	if (samples_out[0]) {
 		for (int i = 0; i < AUDIO_BUFFERS; i++) {
 			memdelete_arr(samples_out[i]);
 		}
-	};
+	}
 
 	mastering_voice->DestroyVoice();
 
 	memdelete(thread);
-	if (mutex)
-		memdelete(mutex);
-	thread = NULL;
-};
+	thread = nullptr;
+}
 
 AudioDriverXAudio2::AudioDriverXAudio2() {
-
-	mutex = NULL;
-	thread = NULL;
-	wave_format = { 0 };
 	for (int i = 0; i < AUDIO_BUFFERS; i++) {
 		xaudio_buffer[i] = { 0 };
 		samples_out[i] = 0;
 	}
-	current_buffer = 0;
-};
-
-AudioDriverXAudio2::~AudioDriverXAudio2() {
-
-
-};
-
-
+}

@@ -3,9 +3,10 @@
 /*************************************************************************/
 /*                       This file is part of:                           */
 /*                           GODOT ENGINE                                */
-/*                    http://www.godotengine.org                         */
+/*                      https://godotengine.org                          */
 /*************************************************************************/
-/* Copyright (c) 2007-2017 Juan Linietsky, Ariel Manzur.                 */
+/* Copyright (c) 2007-2021 Juan Linietsky, Ariel Manzur.                 */
+/* Copyright (c) 2014-2021 Godot Engine contributors (cf. AUTHORS.md).   */
 /*                                                                       */
 /* Permission is hereby granted, free of charge, to any person obtaining */
 /* a copy of this software and associated documentation files (the       */
@@ -26,100 +27,82 @@
 /* TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE     */
 /* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                */
 /*************************************************************************/
+
 #include "audio_driver_dummy.h"
 
-#include "globals.h"
-#include "os/os.h"
-
-
+#include "core/config/project_settings.h"
+#include "core/os/os.h"
 
 Error AudioDriverDummy::init() {
+	active = false;
+	thread_exited = false;
+	exit_thread = false;
+	samples_in = nullptr;
 
-	active=false;
-	thread_exited=false;
-	exit_thread=false;
-	pcm_open = false;
-	samples_in = NULL;
-
-
-	mix_rate = 44100;
+	mix_rate = GLOBAL_GET("audio/mix_rate");
 	speaker_mode = SPEAKER_MODE_STEREO;
 	channels = 2;
 
-	int latency = GLOBAL_DEF("audio/output_latency",25);
-	buffer_size = nearest_power_of_2( latency * mix_rate / 1000 );
+	int latency = GLOBAL_GET("audio/output_latency");
+	buffer_frames = closest_power_of_2(latency * mix_rate / 1000);
 
-	samples_in = memnew_arr(int32_t, buffer_size*channels);
+	samples_in = memnew_arr(int32_t, buffer_frames * channels);
 
-	mutex=Mutex::create();
 	thread = Thread::create(AudioDriverDummy::thread_func, this);
 
 	return OK;
 };
 
-void AudioDriverDummy::thread_func(void* p_udata) {
+void AudioDriverDummy::thread_func(void *p_udata) {
+	AudioDriverDummy *ad = (AudioDriverDummy *)p_udata;
 
-	AudioDriverDummy* ad = (AudioDriverDummy*)p_udata;
-
-	uint64_t usdelay = (ad->buffer_size / float(ad->mix_rate))*1000000;
-
+	uint64_t usdelay = (ad->buffer_frames / float(ad->mix_rate)) * 1000000;
 
 	while (!ad->exit_thread) {
-
-
-		if (!ad->active) {
-
-		} else {
-
+		if (ad->active) {
 			ad->lock();
 
-			ad->audio_server_process(ad->buffer_size, ad->samples_in);
+			ad->audio_server_process(ad->buffer_frames, ad->samples_in);
 
 			ad->unlock();
-
 		};
 
 		OS::get_singleton()->delay_usec(usdelay);
-
 	};
 
-	ad->thread_exited=true;
-
+	ad->thread_exited = true;
 };
 
 void AudioDriverDummy::start() {
-
 	active = true;
 };
 
 int AudioDriverDummy::get_mix_rate() const {
-
 	return mix_rate;
 };
 
 AudioDriver::SpeakerMode AudioDriverDummy::get_speaker_mode() const {
-
 	return speaker_mode;
 };
 
 void AudioDriverDummy::lock() {
-
-	if (!thread || !mutex)
+	if (!thread) {
 		return;
-	mutex->lock();
+	}
+	mutex.lock();
 };
 
 void AudioDriverDummy::unlock() {
-
-	if (!thread || !mutex)
+	if (!thread) {
 		return;
-	mutex->unlock();
+	}
+	mutex.unlock();
 };
 
 void AudioDriverDummy::finish() {
-
-	if (!thread)
+	if (!thread) {
 		return;
+	}
 
 	exit_thread = true;
 	Thread::wait_to_finish(thread);
@@ -129,20 +112,5 @@ void AudioDriverDummy::finish() {
 	};
 
 	memdelete(thread);
-	if (mutex)
-		memdelete(mutex);
-	thread = NULL;
+	thread = nullptr;
 };
-
-AudioDriverDummy::AudioDriverDummy() {
-
-	mutex = NULL;
-	thread=NULL;
-
-};
-
-AudioDriverDummy::~AudioDriverDummy() {
-
-};
-
-

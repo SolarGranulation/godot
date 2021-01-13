@@ -3,9 +3,10 @@
 /*************************************************************************/
 /*                       This file is part of:                           */
 /*                           GODOT ENGINE                                */
-/*                    http://www.godotengine.org                         */
+/*                      https://godotengine.org                          */
 /*************************************************************************/
-/* Copyright (c) 2007-2017 Juan Linietsky, Ariel Manzur.                 */
+/* Copyright (c) 2007-2021 Juan Linietsky, Ariel Manzur.                 */
+/* Copyright (c) 2014-2021 Godot Engine contributors (cf. AUTHORS.md).   */
 /*                                                                       */
 /* Permission is hereby granted, free of charge, to any person obtaining */
 /* a copy of this software and associated documentation files (the       */
@@ -30,74 +31,62 @@
 #ifndef REGEX_H
 #define REGEX_H
 
-#include "core/vector.h"
-#include "core/ustring.h"
-#include "core/dictionary.h"
-#include "core/reference.h"
-#include "core/resource.h"
-
-class RegExNode;
+#include "core/object/reference.h"
+#include "core/string/ustring.h"
+#include "core/templates/map.h"
+#include "core/templates/vector.h"
+#include "core/variant/array.h"
+#include "core/variant/dictionary.h"
 
 class RegExMatch : public Reference {
-
 	GDCLASS(RegExMatch, Reference);
 
-	struct Group {
-		Variant name;
+	struct Range {
 		int start;
-		int length;
+		int end;
 	};
 
-	Vector<Group> captures;
-	String string;
+	String subject;
+	Vector<Range> data;
+	Map<String, int> names;
 
 	friend class RegEx;
-	friend class RegExSearch;
-	friend class RegExNodeCapturing;
-	friend class RegExNodeBackReference;
 
 protected:
-
 	static void _bind_methods();
 
+	int _find(const Variant &p_name) const;
+
 public:
-
-	String expand(const String& p_template) const;
-
+	String get_subject() const;
 	int get_group_count() const;
-	Array get_group_array() const;
+	Dictionary get_names() const;
 
-	Array get_names() const;
-	Dictionary get_name_dict() const;
-
-	String get_string(const Variant& p_name) const;
-	int get_start(const Variant& p_name) const;
-	int get_end(const Variant& p_name) const;
-
-	RegExMatch();
-
+	Array get_strings() const;
+	String get_string(const Variant &p_name) const;
+	int get_start(const Variant &p_name) const;
+	int get_end(const Variant &p_name) const;
 };
 
-class RegEx : public Resource {
+class RegEx : public Reference {
+	GDCLASS(RegEx, Reference);
 
-	GDCLASS(RegEx, Resource);
-
-	RegExNode* root;
-	Vector<Variant> group_names;
+	void *general_ctx;
+	void *code;
 	String pattern;
-	int lookahead_depth;
+
+	void _pattern_info(uint32_t what, void *where) const;
 
 protected:
-
 	static void _bind_methods();
 
 public:
-
 	void clear();
-	Error compile(const String& p_pattern);
+	Error compile(const String &p_pattern);
 
-	Ref<RegExMatch> search(const String& p_text, int p_start = 0, int p_end = -1) const;
-	String sub(const String& p_text, const String& p_replacement, bool p_all = false, int p_start = 0, int p_end = -1) const;
+	Ref<RegExMatch> search(const String &p_subject, int p_offset = 0, int p_end = -1) const;
+	Array search_all(const String &p_subject, int p_offset = 0, int p_end = -1) const;
+	String sub(const String &p_subject, const String &p_replacement, bool p_all = false, int p_offset = 0, int p_end = -1) const;
 
 	bool is_valid() const;
 	String get_pattern() const;
@@ -105,10 +94,8 @@ public:
 	Array get_names() const;
 
 	RegEx();
-	RegEx(const String& p_pattern);
+	RegEx(const String &p_pattern);
 	~RegEx();
-
 };
 
 #endif // REGEX_H
-

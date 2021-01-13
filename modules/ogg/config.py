@@ -1,7 +1,5 @@
-
-def can_build(platform):
-#    return True
-    return False
+def can_build(env, platform):
+    return True
 
 
 def configure(env):

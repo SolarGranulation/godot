@@ -3,9 +3,10 @@
 /*************************************************************************/
 /*                       This file is part of:                           */
 /*                           GODOT ENGINE                                */
-/*                    http://www.godotengine.org                         */
+/*                      https://godotengine.org                          */
 /*************************************************************************/
-/* Copyright (c) 2007-2017 Juan Linietsky, Ariel Manzur.                 */
+/* Copyright (c) 2007-2021 Juan Linietsky, Ariel Manzur.                 */
+/* Copyright (c) 2014-2021 Godot Engine contributors (cf. AUTHORS.md).   */
 /*                                                                       */
 /* Permission is hereby granted, free of charge, to any person obtaining */
 /* a copy of this software and associated documentation files (the       */
@@ -26,48 +27,48 @@
 /* TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE     */
 /* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                */
 /*************************************************************************/
+
 #include "stream_peer_ssl.h"
 
+#include "core/config/engine.h"
 
-StreamPeerSSL* (*StreamPeerSSL::_create)()=NULL;
-
-
-
+StreamPeerSSL *(*StreamPeerSSL::_create)() = nullptr;
 
 StreamPeerSSL *StreamPeerSSL::create() {
-
-	return _create();
+	if (_create) {
+		return _create();
+	}
+	return nullptr;
 }
 
-
-
-StreamPeerSSL::LoadCertsFromMemory StreamPeerSSL::load_certs_func=NULL;
-bool StreamPeerSSL::available=false;
-bool StreamPeerSSL::initialize_certs=true;
-
-void StreamPeerSSL::load_certs_from_memory(const PoolByteArray& p_memory) {
-	if (load_certs_func)
-		load_certs_func(p_memory);
-}
+bool StreamPeerSSL::available = false;
 
 bool StreamPeerSSL::is_available() {
 	return available;
 }
 
-void StreamPeerSSL::_bind_methods() {
-
-
-	ClassDB::bind_method(_MD("accept_stream:Error","stream:StreamPeer"),&StreamPeerSSL::accept_stream);
-	ClassDB::bind_method(_MD("connect_to_stream:Error","stream:StreamPeer","validate_certs","for_hostname"),&StreamPeerSSL::connect_to_stream,DEFVAL(false),DEFVAL(String()));
-	ClassDB::bind_method(_MD("get_status"),&StreamPeerSSL::get_status);
-	ClassDB::bind_method(_MD("disconnect_from_stream"),&StreamPeerSSL::disconnect_from_stream);
-	BIND_CONSTANT( STATUS_DISCONNECTED );
-	BIND_CONSTANT( STATUS_CONNECTED );
-	BIND_CONSTANT( STATUS_ERROR_NO_CERTIFICATE );
-	BIND_CONSTANT( STATUS_ERROR_HOSTNAME_MISMATCH );
-
+void StreamPeerSSL::set_blocking_handshake_enabled(bool p_enabled) {
+	blocking_handshake = p_enabled;
 }
 
-StreamPeerSSL::StreamPeerSSL()
-{
+bool StreamPeerSSL::is_blocking_handshake_enabled() const {
+	return blocking_handshake;
+}
+
+void StreamPeerSSL::_bind_methods() {
+	ClassDB::bind_method(D_METHOD("poll"), &StreamPeerSSL::poll);
+	ClassDB::bind_method(D_METHOD("accept_stream", "stream", "private_key", "certificate", "chain"), &StreamPeerSSL::accept_stream, DEFVAL(Ref<X509Certificate>()));
+	ClassDB::bind_method(D_METHOD("connect_to_stream", "stream", "validate_certs", "for_hostname", "valid_certificate"), &StreamPeerSSL::connect_to_stream, DEFVAL(false), DEFVAL(String()), DEFVAL(Ref<X509Certificate>()));
+	ClassDB::bind_method(D_METHOD("get_status"), &StreamPeerSSL::get_status);
+	ClassDB::bind_method(D_METHOD("disconnect_from_stream"), &StreamPeerSSL::disconnect_from_stream);
+	ClassDB::bind_method(D_METHOD("set_blocking_handshake_enabled", "enabled"), &StreamPeerSSL::set_blocking_handshake_enabled);
+	ClassDB::bind_method(D_METHOD("is_blocking_handshake_enabled"), &StreamPeerSSL::is_blocking_handshake_enabled);
+
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "blocking_handshake"), "set_blocking_handshake_enabled", "is_blocking_handshake_enabled");
+
+	BIND_ENUM_CONSTANT(STATUS_DISCONNECTED);
+	BIND_ENUM_CONSTANT(STATUS_HANDSHAKING);
+	BIND_ENUM_CONSTANT(STATUS_CONNECTED);
+	BIND_ENUM_CONSTANT(STATUS_ERROR);
+	BIND_ENUM_CONSTANT(STATUS_ERROR_HOSTNAME_MISMATCH);
 }

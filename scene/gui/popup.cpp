@@ -3,9 +3,10 @@
 /*************************************************************************/
 /*                       This file is part of:                           */
 /*                           GODOT ENGINE                                */
-/*                    http://www.godotengine.org                         */
+/*                      https://godotengine.org                          */
 /*************************************************************************/
-/* Copyright (c) 2007-2017 Juan Linietsky, Ariel Manzur.                 */
+/* Copyright (c) 2007-2021 Juan Linietsky, Ariel Manzur.                 */
+/* Copyright (c) 2014-2021 Godot Engine contributors (cf. AUTHORS.md).   */
 /*                                                                       */
 /* Permission is hereby granted, free of charge, to any person obtaining */
 /* a copy of this software and associated documentation files (the       */
@@ -26,295 +27,232 @@
 /* TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE     */
 /* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                */
 /*************************************************************************/
+
 #include "popup.h"
-#include "os/keyboard.h"
 
+#include "core/config/engine.h"
+#include "core/os/keyboard.h"
+#include "scene/gui/panel.h"
 
+void Popup::_input_from_window(const Ref<InputEvent> &p_event) {
+	Ref<InputEventKey> key = p_event;
+	if (key.is_valid() && key->is_pressed() && key->get_keycode() == KEY_ESCAPE) {
+		_close_pressed();
+	}
+}
 
-void Popup::_gui_input(InputEvent p_event) {
+void Popup::_initialize_visible_parents() {
+	visible_parents.clear();
 
+	Window *parent_window = this;
+	while (parent_window) {
+		parent_window = parent_window->get_parent_visible_window();
+		if (parent_window) {
+			visible_parents.push_back(parent_window);
+			parent_window->connect("focus_entered", callable_mp(this, &Popup::_parent_focused));
+			parent_window->connect("tree_exited", callable_mp(this, &Popup::_deinitialize_visible_parents));
+		}
+	}
+}
 
+void Popup::_deinitialize_visible_parents() {
+	for (uint32_t i = 0; i < visible_parents.size(); ++i) {
+		visible_parents[i]->disconnect("focus_entered", callable_mp(this, &Popup::_parent_focused));
+		visible_parents[i]->disconnect("tree_exited", callable_mp(this, &Popup::_deinitialize_visible_parents));
+	}
+
+	visible_parents.clear();
 }
 
 void Popup::_notification(int p_what) {
+	switch (p_what) {
+		case NOTIFICATION_VISIBILITY_CHANGED: {
+			if (is_visible()) {
+				_initialize_visible_parents();
+			} else {
+				_deinitialize_visible_parents();
+				emit_signal("popup_hide");
+			}
 
-	if (p_what==NOTIFICATION_VISIBILITY_CHANGED) {
-		if (popped_up && !is_visible_in_tree()) {
-			popped_up=false;
-			notification(NOTIFICATION_POPUP_HIDE);
-			emit_signal("popup_hide");
-		}
-
-		update_configuration_warning();
+		} break;
+		case NOTIFICATION_WM_WINDOW_FOCUS_IN: {
+			if (has_focus()) {
+				popped_up = true;
+			}
+		} break;
+		case NOTIFICATION_EXIT_TREE: {
+			_deinitialize_visible_parents();
+		} break;
+		case NOTIFICATION_WM_CLOSE_REQUEST: {
+			_close_pressed();
+		} break;
+		case NOTIFICATION_APPLICATION_FOCUS_OUT: {
+			_close_pressed();
+		} break;
 	}
-
-	if (p_what==NOTIFICATION_ENTER_TREE) {
-		//small helper to make editing of these easier in editor
-#ifdef TOOLS_ENABLED
-		if (get_tree()->is_editor_hint() && get_tree()->get_edited_scene_root() && get_tree()->get_edited_scene_root()->is_a_parent_of(this)) {
-			set_as_toplevel(false);
-		}
-#endif
-	}
-
 }
 
-void Popup::_fix_size() {
-
-
-#if 0
-	Point2 pos = get_pos();
-	Size2 size = get_size();
-	Point2 window_size = window==this ? get_parent_area_size()  :window->get_size();
-#else
-
-	Point2 pos = get_global_pos();
-	Size2 size = get_size();
-	Point2 window_size = get_viewport_rect().size;
-
-#endif
-	if (pos.x+size.width > window_size.width)
-		pos.x=window_size.width-size.width;
-	if (pos.x<0)
-		pos.x=0;
-
-	if (pos.y+size.height > window_size.height)
-		pos.y=window_size.height-size.height;
-	if (pos.y<0)
-		pos.y=0;
-#if 0
-	if (pos!=get_pos())
-		set_pos(pos);
-#else
-	if (pos!=get_pos())
-		set_global_pos(pos);
-
-#endif
-
+void Popup::_parent_focused() {
+	if (popped_up && close_on_parent_focus) {
+		_close_pressed();
+	}
 }
 
+void Popup::_close_pressed() {
+	popped_up = false;
+
+	_deinitialize_visible_parents();
+
+	call_deferred("hide");
+
+	emit_signal("cancelled");
+}
 
 void Popup::set_as_minsize() {
-
-	Size2 total_minsize;
-
-	for(int i=0;i<get_child_count();i++) {
-
-		Control *c=get_child(i)->cast_to<Control>();
-		if (!c)
-			continue;
-		if (!c->is_visible())
-			continue;
-
-		Size2 minsize = c->get_combined_minimum_size();
-
-		for(int j=0;j<2;j++) {
-
-			Margin m_beg = Margin(0+j);
-			Margin m_end = Margin(2+j);
-
-			float margin_begin = c->get_margin(m_beg);
-			float margin_end = c->get_margin(m_end);
-			AnchorType anchor_begin = c->get_anchor(m_beg);
-			AnchorType anchor_end = c->get_anchor(m_end);
-
-			if (anchor_begin == ANCHOR_BEGIN)
-				minsize[j]+=margin_begin;
-			if (anchor_end == ANCHOR_END)
-				minsize[j]+=margin_end;
-
-		}
-
-		total_minsize.width = MAX( total_minsize.width, minsize.width );
-		total_minsize.height = MAX( total_minsize.height, minsize.height );
-	}
-
-	set_size(total_minsize);
-
+	set_size(get_contents_minimum_size());
 }
 
-
-void Popup::popup_centered_minsize(const Size2& p_minsize) {
-
-
-	Size2 total_minsize=p_minsize;
-
-	for(int i=0;i<get_child_count();i++) {
-
-		Control *c=get_child(i)->cast_to<Control>();
-		if (!c)
-			continue;
-		if (!c->is_visible())
-			continue;
-
-		Size2 minsize = c->get_combined_minimum_size();
-
-		for(int j=0;j<2;j++) {
-
-			Margin m_beg = Margin(0+j);
-			Margin m_end = Margin(2+j);
-
-			float margin_begin = c->get_margin(m_beg);
-			float margin_end = c->get_margin(m_end);
-			AnchorType anchor_begin = c->get_anchor(m_beg);
-			AnchorType anchor_end = c->get_anchor(m_end);
-
-			if (anchor_begin == ANCHOR_BEGIN)
-				minsize[j]+=margin_begin;
-			if (anchor_end == ANCHOR_END)
-				minsize[j]+=margin_end;
-
-		}
-
-		total_minsize.width = MAX( total_minsize.width, minsize.width );
-		total_minsize.height = MAX( total_minsize.height, minsize.height );
-	}
-
-
-	popup_centered( total_minsize );
-	popped_up=true;
-
+void Popup::set_close_on_parent_focus(bool p_close) {
+	close_on_parent_focus = p_close;
 }
 
-void Popup::popup_centered(const Size2& p_size) {
-
-	Point2 window_size = get_viewport_rect().size;
-
-	emit_signal("about_to_show");
-	Rect2 rect;
-	rect.size = p_size==Size2()?get_size():p_size;
-
-	rect.pos = ((window_size-rect.size)/2.0).floor();
-	set_pos( rect.pos );
-	set_size( rect.size );
-
-	show_modal(exclusive);
-	_fix_size();
-
-	Control *focusable = find_next_valid_focus();
-	if (focusable)
-		focusable->grab_focus();
-
-	_post_popup();
-	notification(NOTIFICATION_POST_POPUP);
-	popped_up=true;
+bool Popup::get_close_on_parent_focus() {
+	return close_on_parent_focus;
 }
-
-void Popup::popup_centered_ratio(float p_screen_ratio) {
-
-
-
-	emit_signal("about_to_show");
-
-	Rect2 rect;
-	Point2 window_size = get_viewport_rect().size;
-	rect.size = (window_size * p_screen_ratio).floor();
-	rect.pos = ((window_size-rect.size)/2.0).floor();
-	set_pos( rect.pos );
-	set_size( rect.size );
-
-	show_modal(exclusive);
-	_fix_size();
-
-	Control *focusable = find_next_valid_focus();
-	if (focusable)
-		focusable->grab_focus();
-
-	_post_popup();
-	notification(NOTIFICATION_POST_POPUP);
-	popped_up=true;
-
-}
-
-void Popup::popup() {
-
-	emit_signal("about_to_show");
-	show_modal(exclusive);
-
-
-	_fix_size();
-
-	Control *focusable = find_next_valid_focus();
-
-	if (focusable)
-		focusable->grab_focus();
-
-	_post_popup();
-	notification(NOTIFICATION_POST_POPUP);
-	popped_up=true;
-}
-
-void Popup::set_exclusive(bool p_exclusive) {
-
-	exclusive=p_exclusive;
-}
-
-bool Popup::is_exclusive() const  {
-
-	return exclusive;
-}
-
 
 void Popup::_bind_methods() {
+	ClassDB::bind_method(D_METHOD("set_close_on_parent_focus", "close"), &Popup::set_close_on_parent_focus);
+	ClassDB::bind_method(D_METHOD("get_close_on_parent_focus"), &Popup::get_close_on_parent_focus);
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "close_on_parent_focus"), "set_close_on_parent_focus", "get_close_on_parent_focus");
 
-	ClassDB::bind_method(_MD("popup_centered","size"),&Popup::popup_centered,DEFVAL(Size2()));
-	ClassDB::bind_method(_MD("popup_centered_ratio","ratio"),&Popup::popup_centered_ratio,DEFVAL(0.75));
-	ClassDB::bind_method(_MD("popup_centered_minsize","minsize"),&Popup::popup_centered_minsize,DEFVAL(Size2()));
-	ClassDB::bind_method(_MD("popup"),&Popup::popup);
-	ClassDB::bind_method(_MD("set_exclusive","enable"),&Popup::set_exclusive);
-	ClassDB::bind_method(_MD("is_exclusive"),&Popup::is_exclusive);
-	ADD_SIGNAL( MethodInfo("about_to_show") );
-	ADD_SIGNAL( MethodInfo("popup_hide") );
-	ADD_GROUP("Popup","popup_");
-	ADD_PROPERTY( PropertyInfo( Variant::BOOL, "popup_exclusive"), _SCS("set_exclusive"),_SCS("is_exclusive") );
-	BIND_CONSTANT(NOTIFICATION_POST_POPUP);
-	BIND_CONSTANT(NOTIFICATION_POPUP_HIDE);
+	ADD_SIGNAL(MethodInfo("popup_hide"));
+}
 
+Rect2i Popup::_popup_adjust_rect() const {
+	ERR_FAIL_COND_V(!is_inside_tree(), Rect2());
+	Rect2i parent = get_usable_parent_rect();
 
+	if (parent == Rect2i()) {
+		return Rect2i();
+	}
+
+	Rect2i current(get_position(), get_size());
+
+	if (current.position.x + current.size.x > parent.position.x + parent.size.x) {
+		current.position.x = parent.position.x + parent.size.x - current.size.x;
+	}
+
+	if (current.position.x < parent.position.x) {
+		current.position.x = parent.position.x;
+	}
+
+	if (current.position.y + current.size.y > parent.position.y + parent.size.y) {
+		current.position.y = parent.position.y + parent.size.y - current.size.y;
+	}
+
+	if (current.position.y < parent.position.y) {
+		current.position.y = parent.position.y;
+	}
+
+	if (current.size.y > parent.size.y) {
+		current.size.y = parent.size.y;
+	}
+
+	if (current.size.x > parent.size.x) {
+		current.size.x = parent.size.x;
+	}
+
+	// Early out if max size not set.
+	Size2i max_size = get_max_size();
+	if (max_size <= Size2()) {
+		return current;
+	}
+
+	if (current.size.x > max_size.x) {
+		current.size.x = max_size.x;
+	}
+
+	if (current.size.y > max_size.y) {
+		current.size.y = max_size.y;
+	}
+
+	return current;
 }
 
 Popup::Popup() {
+	set_wrap_controls(true);
+	set_visible(false);
+	set_transient(true);
+	set_flag(FLAG_BORDERLESS, true);
+	set_flag(FLAG_RESIZE_DISABLED, true);
 
-	set_as_toplevel(true);
-	exclusive=false;
-	popped_up=false;
-	hide();
+	connect("window_input", callable_mp(this, &Popup::_input_from_window));
 }
 
-String Popup::get_configuration_warning() const {
+Popup::~Popup() {
+}
 
-	if (is_visible_in_tree()) {
-		return TTR("Popups will hide by default unless you call popup() or any of the popup*() functions. Making them visible for editing is fine though, but they will hide upon running.");
+Size2 PopupPanel::_get_contents_minimum_size() const {
+	Ref<StyleBox> p = get_theme_stylebox("panel", get_class_name());
+
+	Size2 ms;
+
+	for (int i = 0; i < get_child_count(); i++) {
+		Control *c = Object::cast_to<Control>(get_child(i));
+		if (!c || c == panel) {
+			continue;
+		}
+
+		if (c->is_set_as_top_level()) {
+			continue;
+		}
+
+		Size2 cms = c->get_combined_minimum_size();
+		ms.x = MAX(cms.x, ms.x);
+		ms.y = MAX(cms.y, ms.y);
 	}
 
-	return String();
+	return ms + p->get_minimum_size();
 }
 
-Popup::~Popup()
-{
+void PopupPanel::_update_child_rects() {
+	Ref<StyleBox> p = get_theme_stylebox("panel", get_class_name());
 
-}
+	Vector2 cpos(p->get_offset());
+	Vector2 csize(get_size() - p->get_minimum_size());
 
-void PopupPanel::set_child_rect(Control *p_child) {
-	ERR_FAIL_NULL(p_child);
+	for (int i = 0; i < get_child_count(); i++) {
+		Control *c = Object::cast_to<Control>(get_child(i));
+		if (!c) {
+			continue;
+		}
 
-	Ref<StyleBox> p = get_stylebox("panel");
-	p_child->set_area_as_parent_rect();
-	for(int i=0;i<4;i++) {
-		p_child->set_margin(Margin(i),p->get_margin(Margin(i)));
+		if (c->is_set_as_top_level()) {
+			continue;
+		}
+
+		if (c == panel) {
+			c->set_position(Vector2());
+			c->set_size(get_size());
+		} else {
+			c->set_position(cpos);
+			c->set_size(csize);
+		}
 	}
 }
 
 void PopupPanel::_notification(int p_what) {
-
-
-	if (p_what==NOTIFICATION_DRAW) {
-
-		get_stylebox("panel")->draw(get_canvas_item(),Rect2(Point2(),get_size()));
+	if (p_what == NOTIFICATION_THEME_CHANGED) {
+		panel->add_theme_style_override("panel", get_theme_stylebox("panel", get_class_name()));
+	} else if (p_what == NOTIFICATION_READY || p_what == NOTIFICATION_ENTER_TREE) {
+		panel->add_theme_style_override("panel", get_theme_stylebox("panel", get_class_name()));
+		_update_child_rects();
+	} else if (p_what == NOTIFICATION_WM_SIZE_CHANGED) {
+		_update_child_rects();
 	}
 }
 
 PopupPanel::PopupPanel() {
-
-
+	panel = memnew(Panel);
+	add_child(panel);
 }

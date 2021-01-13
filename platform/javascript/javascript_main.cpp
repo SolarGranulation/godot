@@ -3,9 +3,10 @@
 /*************************************************************************/
 /*                       This file is part of:                           */
 /*                           GODOT ENGINE                                */
-/*                    http://www.godotengine.org                         */
+/*                      https://godotengine.org                          */
 /*************************************************************************/
-/* Copyright (c) 2007-2017 Juan Linietsky, Ariel Manzur.                 */
+/* Copyright (c) 2007-2021 Juan Linietsky, Ariel Manzur.                 */
+/* Copyright (c) 2014-2021 Godot Engine contributors (cf. AUTHORS.md).   */
 /*                                                                       */
 /* Permission is hereby granted, free of charge, to any person obtaining */
 /* a copy of this software and associated documentation files (the       */
@@ -26,189 +27,71 @@
 /* TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE     */
 /* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                */
 /*************************************************************************/
-#include <GL/glut.h>
-#include "os_javascript.h"
+
+#include "core/io/resource_loader.h"
 #include "main/main.h"
-#include "io/resource_loader.h"
-#include "emscripten.h"
-#include <string.h>
+#include "platform/javascript/display_server_javascript.h"
+#include "platform/javascript/os_javascript.h"
 
-OS_JavaScript *os=NULL;
+#include <emscripten/emscripten.h>
+#include <stdlib.h>
 
-static void _gfx_init(void *ud,bool gl2,int w, int h,bool fs) {
+#include "godot_js.h"
 
-	glutInitWindowSize(w, h);
-	glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGB | GLUT_DEPTH);
-	glutCreateWindow("godot");
+static OS_JavaScript *os = nullptr;
+static uint64_t target_ticks = 0;
 
+void exit_callback() {
+	emscripten_cancel_main_loop(); // After this, we can exit!
+	Main::cleanup();
+	int exit_code = OS_JavaScript::get_singleton()->get_exit_code();
+	memdelete(os);
+	os = nullptr;
+	emscripten_force_exit(exit_code); // No matter that we call cancel_main_loop, regular "exit" will not work, forcing.
 }
 
-static uint32_t _mouse_button_mask=0;
+void cleanup_after_sync() {
+	emscripten_set_main_loop(exit_callback, -1, false);
+}
 
-static void _glut_mouse_button(int button, int state, int x, int y) {
+void main_loop_callback() {
+	uint64_t current_ticks = os->get_ticks_usec();
 
-	InputEvent ev;
-	ev.type=InputEvent::MOUSE_BUTTON;
-	switch(button) {
-		case GLUT_LEFT_BUTTON: ev.mouse_button.button_index=BUTTON_LEFT; break;
-		case GLUT_MIDDLE_BUTTON: ev.mouse_button.button_index=BUTTON_MIDDLE; break;
-		case GLUT_RIGHT_BUTTON: ev.mouse_button.button_index=BUTTON_RIGHT; break;
-		case 3: ev.mouse_button.button_index=BUTTON_WHEEL_UP; break;
-		case 4: ev.mouse_button.button_index=BUTTON_WHEEL_DOWN; break;
+	bool force_draw = DisplayServerJavaScript::get_singleton()->check_size_force_redraw();
+	if (force_draw) {
+		Main::force_redraw();
+	} else if (current_ticks < target_ticks) {
+		return; // Skip frame.
 	}
 
-
-	ev.mouse_button.pressed=state==GLUT_DOWN;
-	ev.mouse_button.x=x;
-	ev.mouse_button.y=y;
-	ev.mouse_button.global_x=x;
-	ev.mouse_button.global_y=y;
-
-	if (ev.mouse_button.button_index<4) {
-		if (ev.mouse_button.pressed) {
-			_mouse_button_mask |= 1 << (ev.mouse_button.button_index-1);
-		} else {
-			_mouse_button_mask &= ~(1 << (ev.mouse_button.button_index-1));
-		}
+	int target_fps = Engine::get_singleton()->get_target_fps();
+	if (target_fps > 0) {
+		target_ticks += (uint64_t)(1000000 / target_fps);
 	}
-	ev.mouse_button.button_mask=_mouse_button_mask;
-
-	uint32_t m = glutGetModifiers();
-	ev.mouse_button.mod.alt=(m&GLUT_ACTIVE_ALT)!=0;
-	ev.mouse_button.mod.shift=(m&GLUT_ACTIVE_SHIFT)!=0;
-	ev.mouse_button.mod.control=(m&GLUT_ACTIVE_CTRL)!=0;
-
-	os->push_input(ev);
-
-	if (ev.mouse_button.button_index==BUTTON_WHEEL_UP || ev.mouse_button.button_index==BUTTON_WHEEL_DOWN) {
-		// GLUT doesn't send release events for mouse wheel, so send manually
-		ev.mouse_button.pressed=false;
-		os->push_input(ev);
+	if (os->main_loop_iterate()) {
+		emscripten_cancel_main_loop(); // Cancel current loop and wait for cleanup_after_sync.
+		godot_js_os_finish_async(cleanup_after_sync);
 	}
 }
 
+/// When calling main, it is assumed FS is setup and synced.
+extern EMSCRIPTEN_KEEPALIVE int godot_js_main(int argc, char *argv[]) {
+	os = new OS_JavaScript();
 
-static int _glut_prev_x=0;
-static int _glut_prev_y=0;
+	// We must override main when testing is enabled
+	TEST_MAIN_OVERRIDE
 
-static void _glut_mouse_motion(int x, int y) {
+	Main::setup(argv[0], argc - 1, &argv[1]);
 
-	InputEvent ev;
-	ev.type=InputEvent::MOUSE_MOTION;
-	ev.mouse_motion.button_mask=_mouse_button_mask;
-	ev.mouse_motion.x=x;
-	ev.mouse_motion.y=y;
-	ev.mouse_motion.global_x=x;
-	ev.mouse_motion.global_y=y;
-	ev.mouse_motion.relative_x=x-_glut_prev_x;
-	ev.mouse_motion.relative_y=y-_glut_prev_y;
-	_glut_prev_x=x;
-	_glut_prev_y=y;
+	// Ease up compatibility.
+	ResourceLoader::set_abort_on_missing_resources(false);
 
-	uint32_t m = glutGetModifiers();
-	ev.mouse_motion.mod.alt=(m&GLUT_ACTIVE_ALT)!=0;
-	ev.mouse_motion.mod.shift=(m&GLUT_ACTIVE_SHIFT)!=0;
-	ev.mouse_motion.mod.control=(m&GLUT_ACTIVE_CTRL)!=0;
-
-	os->push_input(ev);
-
-}
-
-static void _gfx_idle() {
-
-	glutPostRedisplay();
-}
-
-int start_step=0;
-
-static void _godot_draw(void) {
-
-	if (start_step==1) {
-		start_step=2;
-		Main::start();
-		 os->main_loop_begin();
-	}
-
-	if (start_step==2) {
-		os->main_loop_iterate();
-	}
-
-	glutSwapBuffers();
-}
-
-
-
-extern "C" {
-
-void main_after_fs_sync() {
-
-	start_step=1;
-}
-
-}
-
-int main(int argc, char *argv[]) {
-
-
-	/* Initialize the window */
-	printf("let it go!\n");
-	glutInit(&argc, argv);
-	os = new OS_JavaScript(_gfx_init,NULL,NULL);
-#if 0
-	char *args[]={"-test","gui","-v",NULL};
-	Error err  = Main::setup("apk",3,args);
-#else
-	//char *args[]={"-v",NULL};//
-	//Error err  = Main::setup("",1,args);
-	Error err  = Main::setup("",0,NULL);
-
-#endif
-	ResourceLoader::set_abort_on_missing_resources(false); //ease up compatibility
-
-	glutMouseFunc(_glut_mouse_button);
-	glutMotionFunc(_glut_mouse_motion);
-	glutPassiveMotionFunc(_glut_mouse_motion);
-
-
-
-   /* Set up glut callback functions */
-	glutIdleFunc (_gfx_idle);
-//   glutReshapeFunc(gears_reshape);
-	glutDisplayFunc(_godot_draw);
-   //glutSpecialFunc(gears_special);
-
-	//mount persistent file system
-	/* clang-format off */
-	EM_ASM(
-		FS.mkdir('/userfs');
-		FS.mount(IDBFS, {}, '/userfs');
-
-		// sync from persistent state into memory and then
-		// run the 'main_after_fs_sync' function
-		FS.syncfs(true, function(err) {
-
-			if (err) {
-				Module.setStatus('Failed to load persistent data\nPlease allow (third-party) cookies');
-				Module.printErr('Failed to populate IDB file system: ' + err.message);
-				Module.exit();
-			} else {
-				Module.print('Successfully populated IDB file system');
-				ccall('main_after_fs_sync', 'void', []);
-			}
-		});
-	);
-	/* clang-format on */
-
-	glutMainLoop();
-
-
+	Main::start();
+	os->get_main_loop()->initialize();
+	emscripten_set_main_loop(main_loop_callback, -1, false);
+	// Immediately run the first iteration.
+	// We are inside an animation frame, we want to immediately draw on the newly setup canvas.
+	main_loop_callback();
 
 	return 0;
 }
-
-
-/*
- *
- *09] <azakai|2__> reduz: yes, define  TOTAL_MEMORY on Module. for example             var Module = { TOTAL_MEMORY: 12345.. };         before the main
- *
- */

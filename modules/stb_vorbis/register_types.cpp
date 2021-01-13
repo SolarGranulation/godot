@@ -3,9 +3,10 @@
 /*************************************************************************/
 /*                       This file is part of:                           */
 /*                           GODOT ENGINE                                */
-/*                    http://www.godotengine.org                         */
+/*                      https://godotengine.org                          */
 /*************************************************************************/
-/* Copyright (c) 2007-2017 Juan Linietsky, Ariel Manzur.                 */
+/* Copyright (c) 2007-2021 Juan Linietsky, Ariel Manzur.                 */
+/* Copyright (c) 2014-2021 Godot Engine contributors (cf. AUTHORS.md).   */
 /*                                                                       */
 /* Permission is hereby granted, free of charge, to any person obtaining */
 /* a copy of this software and associated documentation files (the       */
@@ -26,19 +27,26 @@
 /* TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE     */
 /* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                */
 /*************************************************************************/
+
 #include "register_types.h"
+
 #include "audio_stream_ogg_vorbis.h"
 
-static ResourceFormatLoaderAudioStreamOGGVorbis *vorbis_stream_loader = NULL;
+#ifdef TOOLS_ENABLED
+#include "core/config/engine.h"
+#include "resource_importer_ogg_vorbis.h"
+#endif
 
 void register_stb_vorbis_types() {
-
-	vorbis_stream_loader = memnew( ResourceFormatLoaderAudioStreamOGGVorbis );
-	ResourceLoader::add_resource_format_loader(vorbis_stream_loader);
+#ifdef TOOLS_ENABLED
+	if (Engine::get_singleton()->is_editor_hint()) {
+		Ref<ResourceImporterOGGVorbis> ogg_import;
+		ogg_import.instance();
+		ResourceFormatImporter::get_singleton()->add_importer(ogg_import);
+	}
+#endif
 	ClassDB::register_class<AudioStreamOGGVorbis>();
 }
 
 void unregister_stb_vorbis_types() {
-
-	memdelete( vorbis_stream_loader );
 }

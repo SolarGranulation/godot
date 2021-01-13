@@ -3,9 +3,10 @@
 /*************************************************************************/
 /*                       This file is part of:                           */
 /*                           GODOT ENGINE                                */
-/*                    http://www.godotengine.org                         */
+/*                      https://godotengine.org                          */
 /*************************************************************************/
-/* Copyright (c) 2007-2017 Juan Linietsky, Ariel Manzur.                 */
+/* Copyright (c) 2007-2021 Juan Linietsky, Ariel Manzur.                 */
+/* Copyright (c) 2014-2021 Godot Engine contributors (cf. AUTHORS.md).   */
 /*                                                                       */
 /* Permission is hereby granted, free of charge, to any person obtaining */
 /* a copy of this software and associated documentation files (the       */
@@ -26,181 +27,98 @@
 /* TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE     */
 /* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                */
 /*************************************************************************/
+
 #ifdef IPHONE_ENABLED
 
 #ifndef OS_IPHONE_H
 #define OS_IPHONE_H
 
-#include "os/input.h"
+#include "drivers/coreaudio/audio_driver_coreaudio.h"
 #include "drivers/unix/os_unix.h"
-
-#include "servers/visual_server.h"
-#include "servers/visual/rasterizer.h"
-#include "servers/physics/physics_server_sw.h"
-#include "servers/physics_2d/physics_2d_server_sw.h"
-#include "servers/physics_2d/physics_2d_server_wrap_mt.h"
+#include "ios.h"
+#include "joypad_iphone.h"
 #include "servers/audio_server.h"
-#include "main/input_default.h"
-#include "game_center.h"
-#include "in_app_store.h"
-#include "icloud.h"
+#include "servers/rendering/renderer_compositor.h"
 
+#if defined(VULKAN_ENABLED)
+#include "drivers/vulkan/rendering_device_vulkan.h"
+#include "platform/iphone/vulkan_context_iphone.h"
+#endif
 
-class AudioDriverIphone;
-// class RasterizerGLES2;
+extern void godot_ios_plugins_initialize();
+extern void godot_ios_plugins_deinitialize();
 
 class OSIPhone : public OS_Unix {
-
-public:
-
-	enum Orientations {
-		PortraitDown,
-		PortraitUp,
-		LandscapeLeft,
-		LandscapeRight,
-	};
 private:
+	static HashMap<String, void *> dynamic_symbol_lookup_table;
+	friend void register_dynamic_symbol(char *name, void *address);
 
-	enum {
-			MAX_MOUSE_COUNT = 8,
-			MAX_EVENTS = 64,
-	};
+	AudioDriverCoreAudio audio_driver;
 
-	uint8_t supported_orientations;
+	iOS *ios;
 
-//	Rasterizer *rasterizer;
-//	RasterizerGLES2* rasterizer_gles22;
-
-	VisualServer *visual_server;
-	PhysicsServer* physics_server;
-	Physics2DServer *physics_2d_server;
-
-	AudioDriverIphone* audio_driver;
-
-#ifdef GAME_CENTER_ENABLED
-	GameCenter* game_center;
-#endif
-#ifdef STOREKIT_ENABLED
-	InAppStore* store_kit;
-#endif
-#ifdef ICLOUD_ENABLED
-	ICloud* icloud;
-#endif
+	JoypadIPhone *joypad_iphone;
 
 	MainLoop *main_loop;
 
-	VideoMode video_mode;
+	virtual void initialize_core() override;
+	virtual void initialize() override;
 
+	virtual void initialize_joypads() override {
+	}
 
-	virtual int get_video_driver_count() const;
-	virtual const char * get_video_driver_name(int p_driver) const;
+	virtual void set_main_loop(MainLoop *p_main_loop) override;
+	virtual MainLoop *get_main_loop() const override;
 
-	virtual VideoMode get_default_video_mode() const;
+	virtual void delete_main_loop() override;
 
-	virtual void initialize_core();
-	virtual void initialize(const VideoMode& p_desired,int p_video_driver,int p_audio_driver);
+	virtual void finalize() override;
 
-	virtual void set_main_loop( MainLoop * p_main_loop );
-	virtual MainLoop *get_main_loop() const;
+	String user_data_dir;
 
-	virtual void delete_main_loop();
+	bool is_focused = false;
 
-	virtual void finalize();
-
-	struct MouseList {
-
-		bool pressed[MAX_MOUSE_COUNT];
-		MouseList() {
-			for (int i=0; i<MAX_MOUSE_COUNT; i++)
-				pressed[i] = false;
-		};
-	};
-
-	MouseList mouse_list;
-
-	Vector3 last_accel;
-
-	InputEvent event_queue[MAX_EVENTS];
-	int event_count;
-	int last_event_id;
-	void queue_event(const InputEvent& p_event);
-
-	String data_dir;
-	String unique_ID;
-	String locale_code;
-
-	InputDefault *input;
+	void deinitialize_modules();
 
 public:
+	static OSIPhone *get_singleton();
+
+	OSIPhone(String p_data_dir);
+	~OSIPhone();
+
+	void initialize_modules();
 
 	bool iterate();
 
-	uint8_t get_orientations() const;
+	void start();
 
-	void mouse_button(int p_idx, int p_x, int p_y, bool p_pressed, bool p_doubleclick, bool p_use_as_mouse);
-	void mouse_move(int p_idx, int p_prev_x, int p_prev_y, int p_x, int p_y, bool p_use_as_mouse);
-	void touches_cancelled();
-	void key(uint32_t p_key, bool p_pressed);
+	virtual Error open_dynamic_library(const String p_path, void *&p_library_handle, bool p_also_set_library_path = false) override;
+	virtual Error close_dynamic_library(void *p_library_handle) override;
+	virtual Error get_dynamic_library_symbol_handle(void *p_library_handle, const String p_name, void *&p_symbol_handle, bool p_optional = false) override;
 
-	int set_base_framebuffer(int p_fb);
+	virtual void alert(const String &p_alert,
+			const String &p_title = "ALERT!") override;
 
-	void update_gravity(float p_x, float p_y, float p_z);
-	void update_accelerometer(float p_x, float p_y, float p_z);
-	void update_magnetometer(float p_x, float p_y, float p_z);
-	void update_gyroscope(float p_x, float p_y, float p_z);
+	virtual String get_name() const override;
+	virtual String get_model_name() const override;
 
-	static OSIPhone* get_singleton();
+	virtual Error shell_open(String p_uri) override;
 
-	virtual void set_mouse_show(bool p_show);
-	virtual void set_mouse_grab(bool p_grab);
-	virtual bool is_mouse_grab_enabled() const;
-	virtual Point2 get_mouse_pos() const;
-	virtual int get_mouse_button_state() const;
-	virtual void set_window_title(const String& p_title);
+	void set_user_data_dir(String p_dir);
+	virtual String get_user_data_dir() const override;
 
-	virtual void set_video_mode(const VideoMode& p_video_mode,int p_screen=0);
-	virtual VideoMode get_video_mode(int p_screen=0) const;
-	virtual void get_fullscreen_mode_list(List<VideoMode> *p_list,int p_screen=0) const;
+	virtual String get_locale() const override;
 
-	virtual void set_keep_screen_on(bool p_enabled);
+	virtual String get_unique_id() const override;
 
-	virtual bool can_draw() const;
+	virtual void vibrate_handheld(int p_duration_ms = 500) override;
 
-	virtual bool has_virtual_keyboard() const;
-	virtual void show_virtual_keyboard(const String& p_existing_text,const Rect2& p_screen_rect=Rect2());
-	virtual void hide_virtual_keyboard();
+	virtual bool _check_internal_feature_support(const String &p_feature) override;
 
-	virtual void set_cursor_shape(CursorShape p_shape);
-
-	virtual Size2 get_window_size() const;
-
-	virtual bool has_touchscreen_ui_hint() const;
-
-	void set_data_dir(String p_dir);
-
-	virtual String get_name();
-
-	Error shell_open(String p_uri);
-
-	String get_data_dir() const;
-
-	void set_locale(String p_locale);
-	String get_locale() const;
-
-	void set_unique_ID(String p_ID);
-	String get_unique_ID() const;
-
-	virtual Error native_video_play(String p_path, float p_volume, String p_audio_track, String p_subtitle_track);
-	virtual bool native_video_is_playing() const;
-	virtual void native_video_pause();
-	virtual void native_video_unpause();
-	virtual void native_video_focus_out();
-	virtual void native_video_stop();
-
-	OSIPhone(int width, int height);
-	~OSIPhone();
+	void on_focus_out();
+	void on_focus_in();
 };
 
 #endif // OS_IPHONE_H
 
-#endif
+#endif // IPHONE_ENABLED

@@ -3,9 +3,10 @@
 /*************************************************************************/
 /*                       This file is part of:                           */
 /*                           GODOT ENGINE                                */
-/*                    http://www.godotengine.org                         */
+/*                      https://godotengine.org                          */
 /*************************************************************************/
-/* Copyright (c) 2007-2017 Juan Linietsky, Ariel Manzur.                 */
+/* Copyright (c) 2007-2021 Juan Linietsky, Ariel Manzur.                 */
+/* Copyright (c) 2014-2021 Godot Engine contributors (cf. AUTHORS.md).   */
 /*                                                                       */
 /* Permission is hereby granted, free of charge, to any person obtaining */
 /* a copy of this software and associated documentation files (the       */
@@ -26,15 +27,15 @@
 /* TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE     */
 /* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                */
 /*************************************************************************/
+
 #include "register_types.h"
 #ifndef _3D_DISABLED
-#include "class_db.h"
+#include "core/object/class_db.h"
 #include "grid_map.h"
 #include "grid_map_editor_plugin.h"
 #endif
 
 void register_gridmap_types() {
-
 #ifndef _3D_DISABLED
 	ClassDB::register_class<GridMap>();
 #ifdef TOOLS_ENABLED
@@ -43,9 +44,5 @@ void register_gridmap_types() {
 #endif
 }
 
-
-
 void unregister_gridmap_types() {
-
-
 }

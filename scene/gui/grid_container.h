@@ -3,9 +3,10 @@
 /*************************************************************************/
 /*                       This file is part of:                           */
 /*                           GODOT ENGINE                                */
-/*                    http://www.godotengine.org                         */
+/*                      https://godotengine.org                          */
 /*************************************************************************/
-/* Copyright (c) 2007-2017 Juan Linietsky, Ariel Manzur.                 */
+/* Copyright (c) 2007-2021 Juan Linietsky, Ariel Manzur.                 */
+/* Copyright (c) 2014-2021 Godot Engine contributors (cf. AUTHORS.md).   */
 /*                                                                       */
 /* Permission is hereby granted, free of charge, to any person obtaining */
 /* a copy of this software and associated documentation files (the       */
@@ -26,25 +27,25 @@
 /* TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE     */
 /* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                */
 /*************************************************************************/
+
 #ifndef GRID_CONTAINER_H
 #define GRID_CONTAINER_H
 
 #include "scene/gui/container.h"
 
 class GridContainer : public Container {
-
-	GDCLASS(GridContainer,Container);
+	GDCLASS(GridContainer, Container);
 
 	int columns;
-protected:
 
+protected:
 	void _notification(int p_what);
 	static void _bind_methods();
-public:
 
+public:
 	void set_columns(int p_columns);
 	int get_columns() const;
-	virtual Size2 get_minimum_size() const;
+	virtual Size2 get_minimum_size() const override;
 
 	GridContainer();
 };

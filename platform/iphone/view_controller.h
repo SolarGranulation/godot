@@ -3,9 +3,10 @@
 /*************************************************************************/
 /*                       This file is part of:                           */
 /*                           GODOT ENGINE                                */
-/*                    http://www.godotengine.org                         */
+/*                      https://godotengine.org                          */
 /*************************************************************************/
-/* Copyright (c) 2007-2017 Juan Linietsky, Ariel Manzur.                 */
+/* Copyright (c) 2007-2021 Juan Linietsky, Ariel Manzur.                 */
+/* Copyright (c) 2014-2021 Godot Engine contributors (cf. AUTHORS.md).   */
 /*                                                                       */
 /* Permission is hereby granted, free of charge, to any person obtaining */
 /* a copy of this software and associated documentation files (the       */
@@ -26,18 +27,21 @@
 /* TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE     */
 /* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                */
 /*************************************************************************/
+
 #import <UIKit/UIKit.h>
-#import <GameKit/GameKit.h>
 
-@interface ViewController : UIViewController <GKGameCenterControllerDelegate> {
+@class GodotView;
+@class GodotNativeVideoView;
+@class GodotKeyboardInputView;
 
-};
+@interface ViewController : UIViewController
 
-- (BOOL)shouldAutorotateToInterfaceOrientation:
-		(UIInterfaceOrientation)p_orientation;
+@property(nonatomic, readonly, strong) GodotView *godotView;
+@property(nonatomic, readonly, strong) GodotNativeVideoView *videoView;
+@property(nonatomic, readonly, strong) GodotKeyboardInputView *keyboardView;
 
-- (void)didReceiveMemoryWarning;
+// MARK: Native Video Player
 
-- (BOOL)prefersStatusBarHidden;
+- (BOOL)playVideoAtPath:(NSString *)filePath volume:(float)videoVolume audio:(NSString *)audioTrack subtitle:(NSString *)subtitleTrack;
 
 @end

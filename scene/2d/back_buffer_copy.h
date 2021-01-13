@@ -3,9 +3,10 @@
 /*************************************************************************/
 /*                       This file is part of:                           */
 /*                           GODOT ENGINE                                */
-/*                    http://www.godotengine.org                         */
+/*                      https://godotengine.org                          */
 /*************************************************************************/
-/* Copyright (c) 2007-2017 Juan Linietsky, Ariel Manzur.                 */
+/* Copyright (c) 2007-2021 Juan Linietsky, Ariel Manzur.                 */
+/* Copyright (c) 2014-2021 Godot Engine contributors (cf. AUTHORS.md).   */
 /*                                                                       */
 /* Permission is hereby granted, free of charge, to any person obtaining */
 /* a copy of this software and associated documentation files (the       */
@@ -26,39 +27,43 @@
 /* TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE     */
 /* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                */
 /*************************************************************************/
+
 #ifndef BACKBUFFERCOPY_H
 #define BACKBUFFERCOPY_H
 
 #include "scene/2d/node_2d.h"
 
 class BackBufferCopy : public Node2D {
-	GDCLASS( BackBufferCopy,Node2D);
+	GDCLASS(BackBufferCopy, Node2D);
+
 public:
 	enum CopyMode {
 		COPY_MODE_DISABLED,
 		COPY_MODE_RECT,
 		COPY_MODE_VIEWPORT
 	};
-private:
 
+private:
 	Rect2 rect;
 	CopyMode copy_mode;
 
 	void _update_copy_mode();
 
 protected:
-
 	static void _bind_methods();
 
 public:
+#ifdef TOOLS_ENABLED
+	Rect2 _edit_get_rect() const override;
+	virtual bool _edit_use_rect() const override;
+#endif
 
-	void set_rect(const Rect2& p_rect);
+	void set_rect(const Rect2 &p_rect);
 	Rect2 get_rect() const;
+	Rect2 get_anchorable_rect() const override;
 
 	void set_copy_mode(CopyMode p_mode);
 	CopyMode get_copy_mode() const;
-
-	Rect2 get_item_rect() const;
 
 	BackBufferCopy();
 	~BackBufferCopy();

@@ -3,9 +3,10 @@
 /*************************************************************************/
 /*                       This file is part of:                           */
 /*                           GODOT ENGINE                                */
-/*                    http://www.godotengine.org                         */
+/*                      https://godotengine.org                          */
 /*************************************************************************/
-/* Copyright (c) 2007-2017 Juan Linietsky, Ariel Manzur.                 */
+/* Copyright (c) 2007-2021 Juan Linietsky, Ariel Manzur.                 */
+/* Copyright (c) 2014-2021 Godot Engine contributors (cf. AUTHORS.md).   */
 /*                                                                       */
 /* Permission is hereby granted, free of charge, to any person obtaining */
 /* a copy of this software and associated documentation files (the       */
@@ -26,11 +27,13 @@
 /* TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE     */
 /* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                */
 /*************************************************************************/
+
 #ifndef IMAGE_COMPRESS_SQUISH_H
 #define IMAGE_COMPRESS_SQUISH_H
 
-#include "image.h"
+#include "core/io/image.h"
 
-void image_compress_squish(Image *p_image);
+void image_compress_squish(Image *p_image, float p_lossy_quality, Image::UsedChannels p_channels);
+void image_decompress_squish(Image *p_image);
 
 #endif // IMAGE_COMPRESS_SQUISH_H

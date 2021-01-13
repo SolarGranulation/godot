@@ -3,9 +3,10 @@
 /*************************************************************************/
 /*                       This file is part of:                           */
 /*                           GODOT ENGINE                                */
-/*                    http://www.godotengine.org                         */
+/*                      https://godotengine.org                          */
 /*************************************************************************/
-/* Copyright (c) 2007-2017 Juan Linietsky, Ariel Manzur.                 */
+/* Copyright (c) 2007-2021 Juan Linietsky, Ariel Manzur.                 */
+/* Copyright (c) 2014-2021 Godot Engine contributors (cf. AUTHORS.md).   */
 /*                                                                       */
 /* Permission is hereby granted, free of charge, to any person obtaining */
 /* a copy of this software and associated documentation files (the       */
@@ -26,23 +27,16 @@
 /* TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE     */
 /* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                */
 /*************************************************************************/
+
 #include "joypad_osx.h"
 
 #include <machine/endian.h>
 
 #define GODOT_JOY_LOOP_RUN_MODE CFSTR("GodotJoypad")
 
-static JoypadOSX* self = NULL;
+static JoypadOSX *self = nullptr;
 
 joypad::joypad() {
-	device_ref = NULL;
-	ff_device = NULL;
-	ff_axes = NULL;
-	ff_directions = NULL;
-	ffservice = 0;
-	ff_timestamp = 0;
-	id = 0;
-
 	ff_constant_force.lMagnitude = 10000;
 	ff_effect.dwDuration = 0;
 	ff_effect.dwSamplePeriod = 0;
@@ -51,7 +45,7 @@ joypad::joypad() {
 	ff_effect.dwTriggerButton = FFEB_NOTRIGGER;
 	ff_effect.dwStartDelay = 0;
 	ff_effect.dwTriggerRepeatInterval = 0;
-	ff_effect.lpEnvelope = NULL;
+	ff_effect.lpEnvelope = nullptr;
 	ff_effect.cbTypeSpecificParams = sizeof(FFCONSTANTFORCE);
 	ff_effect.lpvTypeSpecificParams = &ff_constant_force;
 	ff_effect.dwSize = sizeof(ff_effect);
@@ -83,7 +77,7 @@ int joypad::get_hid_element_state(rec_element *p_element) const {
 	if (p_element && p_element->ref) {
 		IOHIDValueRef valueRef;
 		if (IOHIDDeviceGetValue(device_ref, p_element->ref, &valueRef) == kIOReturnSuccess) {
-			value = (SInt32) IOHIDValueGetIntegerValue(valueRef);
+			value = (SInt32)IOHIDValueGetIntegerValue(valueRef);
 
 			/* record min and max for auto calibration */
 			if (value < p_element->min) {
@@ -96,6 +90,7 @@ int joypad::get_hid_element_state(rec_element *p_element) const {
 	}
 	return value;
 }
+
 void joypad::add_hid_element(IOHIDElementRef p_element) {
 	const CFTypeID elementTypeID = p_element ? CFGetTypeID(p_element) : 0;
 
@@ -103,94 +98,92 @@ void joypad::add_hid_element(IOHIDElementRef p_element) {
 		const IOHIDElementCookie cookie = IOHIDElementGetCookie(p_element);
 		const uint32_t usagePage = IOHIDElementGetUsagePage(p_element);
 		const uint32_t usage = IOHIDElementGetUsage(p_element);
-		Vector<rec_element> *list = NULL;
+		Vector<rec_element> *list = nullptr;
 
 		switch (IOHIDElementGetType(p_element)) {
-		case kIOHIDElementTypeInput_Misc:
-		case kIOHIDElementTypeInput_Button:
-		case kIOHIDElementTypeInput_Axis: {
-			switch (usagePage) {
-			case kHIDPage_GenericDesktop:
-				switch (usage) {
-				case kHIDUsage_GD_X:
-				case kHIDUsage_GD_Y:
-				case kHIDUsage_GD_Z:
-				case kHIDUsage_GD_Rx:
-				case kHIDUsage_GD_Ry:
-				case kHIDUsage_GD_Rz:
-				case kHIDUsage_GD_Slider:
-				case kHIDUsage_GD_Dial:
-				case kHIDUsage_GD_Wheel:
-					if (!has_element(cookie, &axis_elements)) {
-						list = &axis_elements;
-					}
-					break;
+			case kIOHIDElementTypeInput_Misc:
+			case kIOHIDElementTypeInput_Button:
+			case kIOHIDElementTypeInput_Axis: {
+				switch (usagePage) {
+					case kHIDPage_GenericDesktop:
+						switch (usage) {
+							case kHIDUsage_GD_X:
+							case kHIDUsage_GD_Y:
+							case kHIDUsage_GD_Z:
+							case kHIDUsage_GD_Rx:
+							case kHIDUsage_GD_Ry:
+							case kHIDUsage_GD_Rz:
+							case kHIDUsage_GD_Slider:
+							case kHIDUsage_GD_Dial:
+							case kHIDUsage_GD_Wheel:
+								if (!has_element(cookie, &axis_elements)) {
+									list = &axis_elements;
+								}
+								break;
 
-				case kHIDUsage_GD_Hatswitch:
-					if (!has_element(cookie, &hat_elements)) {
-						list = &hat_elements;
-					}
-					break;
-				case kHIDUsage_GD_DPadUp:
-				case kHIDUsage_GD_DPadDown:
-				case kHIDUsage_GD_DPadRight:
-				case kHIDUsage_GD_DPadLeft:
-				case kHIDUsage_GD_Start:
-				case kHIDUsage_GD_Select:
-					if (!has_element(cookie, &button_elements)) {
-						list = &button_elements;
-					}
-					break;
+							case kHIDUsage_GD_Hatswitch:
+								if (!has_element(cookie, &hat_elements)) {
+									list = &hat_elements;
+								}
+								break;
+							case kHIDUsage_GD_DPadUp:
+							case kHIDUsage_GD_DPadDown:
+							case kHIDUsage_GD_DPadRight:
+							case kHIDUsage_GD_DPadLeft:
+							case kHIDUsage_GD_Start:
+							case kHIDUsage_GD_Select:
+								if (!has_element(cookie, &button_elements)) {
+									list = &button_elements;
+								}
+								break;
+						}
+						break;
+
+					case kHIDPage_Simulation:
+						switch (usage) {
+							case kHIDUsage_Sim_Rudder:
+							case kHIDUsage_Sim_Throttle:
+								if (!has_element(cookie, &axis_elements)) {
+									list = &axis_elements;
+								}
+								break;
+
+							default:
+								break;
+						}
+						break;
+
+					case kHIDPage_Button:
+					case kHIDPage_Consumer:
+						if (!has_element(cookie, &button_elements)) {
+							list = &button_elements;
+						}
+						break;
+
+					default:
+						break;
 				}
-				break;
+			} break;
 
-			case kHIDPage_Simulation:
-				switch (usage) {
-				case kHIDUsage_Sim_Rudder:
-				case kHIDUsage_Sim_Throttle:
-					if (!has_element(cookie, &axis_elements)) {
-						list = &axis_elements;
-					}
-					break;
-
-				default:
-					break;
+			case kIOHIDElementTypeCollection: {
+				CFArrayRef array = IOHIDElementGetChildren(p_element);
+				if (array) {
+					add_hid_elements(array);
 				}
-				break;
-
-			case kHIDPage_Button:
-			case kHIDPage_Consumer:
-				if (!has_element(cookie, &button_elements)) {
-					list = &button_elements;
-				}
-				break;
+			} break;
 
 			default:
 				break;
-			}
-		}
-			break;
-
-		case kIOHIDElementTypeCollection: {
-			CFArrayRef array = IOHIDElementGetChildren(p_element);
-			if (array) {
-				add_hid_elements(array);
-			}
-		}
-			break;
-
-		default:
-			break;
 		}
 
-		if (list) {       /* add to list */
+		if (list) { /* add to list */
 			rec_element element;
 
 			element.ref = p_element;
 			element.usage = usage;
 
-			element.min = (SInt32) IOHIDElementGetLogicalMin(p_element);
-			element.max = (SInt32) IOHIDElementGetLogicalMax(p_element);
+			element.min = (SInt32)IOHIDElementGetLogicalMin(p_element);
+			element.max = (SInt32)IOHIDElementGetLogicalMax(p_element);
 			element.cookie = IOHIDElementGetCookie(p_element);
 			list->push_back(element);
 			list->sort_custom<rec_element::Comparator>();
@@ -199,32 +192,29 @@ void joypad::add_hid_element(IOHIDElementRef p_element) {
 }
 
 static void hid_element_added(const void *p_value, void *p_parameter) {
-	joypad *joy = (joypad*) p_parameter;
-	joy->add_hid_element((IOHIDElementRef) p_value);
+	joypad *joy = (joypad *)p_parameter;
+	joy->add_hid_element((IOHIDElementRef)p_value);
 }
 
 void joypad::add_hid_elements(CFArrayRef p_array) {
 	CFRange range = { 0, CFArrayGetCount(p_array) };
-	CFArrayApplyFunction(p_array, range,hid_element_added,this);
+	CFArrayApplyFunction(p_array, range, hid_element_added, this);
 }
 
-static void joypad_removed_callback(void *ctx, IOReturn result, void *sender) {
-	int id = (intptr_t) ctx;
-	self->_device_removed(id);
+static void joypad_removed_callback(void *ctx, IOReturn res, void *sender, IOHIDDeviceRef ioHIDDeviceObject) {
+	self->_device_removed(res, ioHIDDeviceObject);
 }
-
 
 static void joypad_added_callback(void *ctx, IOReturn res, void *sender, IOHIDDeviceRef ioHIDDeviceObject) {
 	self->_device_added(res, ioHIDDeviceObject);
 }
 
 static bool is_joypad(IOHIDDeviceRef p_device_ref) {
-	CFTypeRef refCF = NULL;
 	int usage_page = 0;
 	int usage = 0;
-	refCF = IOHIDDeviceGetProperty(p_device_ref, CFSTR(kIOHIDPrimaryUsagePageKey));
+	CFTypeRef refCF = IOHIDDeviceGetProperty(p_device_ref, CFSTR(kIOHIDPrimaryUsagePageKey));
 	if (refCF) {
-		CFNumberGetValue((CFNumberRef) refCF, kCFNumberSInt32Type, &usage_page);
+		CFNumberGetValue((CFNumberRef)refCF, kCFNumberSInt32Type, &usage_page);
 	}
 	if (usage_page != kHIDPage_GenericDesktop) {
 		return false;
@@ -232,18 +222,17 @@ static bool is_joypad(IOHIDDeviceRef p_device_ref) {
 
 	refCF = IOHIDDeviceGetProperty(p_device_ref, CFSTR(kIOHIDPrimaryUsageKey));
 	if (refCF) {
-		CFNumberGetValue((CFNumberRef) refCF, kCFNumberSInt32Type, &usage);
+		CFNumberGetValue((CFNumberRef)refCF, kCFNumberSInt32Type, &usage);
 	}
 	if ((usage != kHIDUsage_GD_Joystick &&
-		 usage != kHIDUsage_GD_GamePad &&
-		 usage != kHIDUsage_GD_MultiAxisController)) {
+				usage != kHIDUsage_GD_GamePad &&
+				usage != kHIDUsage_GD_MultiAxisController)) {
 		return false;
 	}
 	return true;
 }
 
 void JoypadOSX::_device_added(IOReturn p_res, IOHIDDeviceRef p_device) {
-
 	if (p_res != kIOReturnSuccess || have_device(p_device)) {
 		return;
 	}
@@ -252,10 +241,10 @@ void JoypadOSX::_device_added(IOReturn p_res, IOHIDDeviceRef p_device) {
 	if (is_joypad(p_device)) {
 		configure_joypad(p_device, &new_joypad);
 #if MAC_OS_X_VERSION_MIN_REQUIRED < 1060
-		if (IOHIDDeviceGetService != NULL) {
+		if (IOHIDDeviceGetService != nullptr) {
 #endif
 			const io_service_t ioservice = IOHIDDeviceGetService(p_device);
-			if ((ioservice) && (FFIsForceFeedback(ioservice) == FF_OK) && new_joypad.config_force_feedback(ioservice))  {
+			if ((ioservice) && (FFIsForceFeedback(ioservice) == FF_OK) && new_joypad.config_force_feedback(ioservice)) {
 				new_joypad.ffservice = ioservice;
 			}
 #if MAC_OS_X_VERSION_MIN_REQUIRED < 1060
@@ -263,51 +252,44 @@ void JoypadOSX::_device_added(IOReturn p_res, IOHIDDeviceRef p_device) {
 #endif
 		device_list.push_back(new_joypad);
 	}
-	IOHIDDeviceRegisterRemovalCallback(p_device, joypad_removed_callback, (void*) (intptr_t) new_joypad.id);
 	IOHIDDeviceScheduleWithRunLoop(p_device, CFRunLoopGetCurrent(), GODOT_JOY_LOOP_RUN_MODE);
 }
 
-void JoypadOSX::_device_removed(int p_id) {
-
-	int device = get_joy_index(p_id);
+void JoypadOSX::_device_removed(IOReturn p_res, IOHIDDeviceRef p_device) {
+	int device = get_joy_ref(p_device);
 	ERR_FAIL_COND(device == -1);
 
-	input->joy_connection_changed(p_id, false, "");
-	device_list[device].free();
+	input->joy_connection_changed(device_list[device].id, false, "");
+	device_list.write[device].free();
 	device_list.remove(device);
-	attached_devices[p_id] = false;
 }
 
 static String _hex_str(uint8_t p_byte) {
-
-	static const char* dict = "0123456789abcdef";
+	static const char *dict = "0123456789abcdef";
 	char ret[3];
 	ret[2] = 0;
 
-	ret[0] = dict[p_byte>>4];
+	ret[0] = dict[p_byte >> 4];
 	ret[1] = dict[p_byte & 0xF];
 
 	return ret;
 }
 
-bool JoypadOSX::configure_joypad(IOHIDDeviceRef p_device_ref, joypad* p_joy) {
-
-	CFTypeRef refCF = NULL;
-
+bool JoypadOSX::configure_joypad(IOHIDDeviceRef p_device_ref, joypad *p_joy) {
 	p_joy->device_ref = p_device_ref;
 	/* get device name */
 	String name;
 	char c_name[256];
-	refCF = IOHIDDeviceGetProperty(p_device_ref, CFSTR(kIOHIDProductKey));
+	CFTypeRef refCF = IOHIDDeviceGetProperty(p_device_ref, CFSTR(kIOHIDProductKey));
 	if (!refCF) {
 		refCF = IOHIDDeviceGetProperty(p_device_ref, CFSTR(kIOHIDManufacturerKey));
 	}
-	if ((!refCF) || (!CFStringGetCString((CFStringRef) refCF, c_name, sizeof (c_name), kCFStringEncodingUTF8))) {
+	if ((!refCF) || (!CFStringGetCString((CFStringRef)refCF, c_name, sizeof(c_name), kCFStringEncodingUTF8))) {
 		name = "Unidentified Joypad";
 	}
 	name = c_name;
 
-	int id = get_free_joy_id();
+	int id = input->get_unused_joy_id();
 	ERR_FAIL_COND_V(id == -1, false);
 	p_joy->id = id;
 	int vendor = 0;
@@ -321,23 +303,30 @@ bool JoypadOSX::configure_joypad(IOHIDDeviceRef p_device_ref, joypad* p_joy) {
 	if (refCF) {
 		CFNumberGetValue((CFNumberRef)refCF, kCFNumberSInt32Type, &product_id);
 	}
+
+	int version = 0;
+	refCF = IOHIDDeviceGetProperty(p_device_ref, CFSTR(kIOHIDVersionNumberKey));
+	if (refCF) {
+		CFNumberGetValue((CFNumberRef)refCF, kCFNumberSInt32Type, &version);
+	}
+
 	if (vendor && product_id) {
 		char uid[128];
-		sprintf(uid, "%04x%08x%04x%08x", OSSwapHostToBigInt32(vendor),0, OSSwapHostToBigInt32(product_id), 0);
+		sprintf(uid, "%08x%08x%08x%08x", OSSwapHostToBigInt32(3), OSSwapHostToBigInt32(vendor), OSSwapHostToBigInt32(product_id), OSSwapHostToBigInt32(version));
 		input->joy_connection_changed(id, true, name, uid);
-	}
-	else {
+	} else {
 		//bluetooth device
 		String guid = "05000000";
 		for (int i = 0; i < 12; i++) {
-			if (i < name.size()) guid += _hex_str(name[i]);
-			else guid += "00";
+			if (i < name.size())
+				guid += _hex_str(name[i]);
+			else
+				guid += "00";
 		}
 		input->joy_connection_changed(id, true, name, guid);
 	}
 
-	CFArrayRef array = NULL;
-	array = IOHIDDeviceCopyMatchingElements(p_device_ref, NULL, kIOHIDOptionsTypeNone);
+	CFArrayRef array = IOHIDDeviceCopyMatchingElements(p_device_ref, nullptr, kIOHIDOptionsTypeNone);
 	if (array) {
 		p_joy->add_hid_elements(array);
 		CFRelease(array);
@@ -345,9 +334,14 @@ bool JoypadOSX::configure_joypad(IOHIDDeviceRef p_device_ref, joypad* p_joy) {
 	return true;
 }
 
-#define FF_ERR() { if (ret != FF_OK) { FFReleaseDevice(ff_device); return false; } }
+#define FF_ERR()                        \
+	{                                   \
+		if (ret != FF_OK) {             \
+			FFReleaseDevice(ff_device); \
+			return false;               \
+		}                               \
+	}
 bool joypad::config_force_feedback(io_service_t p_service) {
-
 	HRESULT ret = FFCreateDevice(p_service, &ff_device);
 	ERR_FAIL_COND_V(ret != FF_OK, false);
 
@@ -369,16 +363,16 @@ bool joypad::config_force_feedback(io_service_t p_service) {
 
 #define TEST_FF(ff) (features.supportedEffects & (ff))
 bool joypad::check_ff_features() {
-
 	FFCAPABILITIES features;
 	HRESULT ret = FFDeviceGetForceFeedbackCapabilities(ff_device, &features);
 	if (ret == FF_OK && (features.supportedEffects & FFCAP_ET_CONSTANTFORCE)) {
 		uint32_t val;
 		ret = FFDeviceGetForceFeedbackProperty(ff_device, FFPROP_FFGAIN, &val, sizeof(val));
-		if (ret != FF_OK) return false;
+		if (ret != FF_OK)
+			return false;
 		int num_axes = features.numFfAxes;
-		ff_axes = (DWORD*) memalloc(sizeof(DWORD) * num_axes);
-		ff_directions = (LONG*) memalloc(sizeof(LONG) * num_axes);
+		ff_axes = (DWORD *)memalloc(sizeof(DWORD) * num_axes);
+		ff_directions = (LONG *)memalloc(sizeof(LONG) * num_axes);
 
 		for (int i = 0; i < num_axes; i++) {
 			ff_axes[i] = features.ffAxes[i];
@@ -396,85 +390,85 @@ bool joypad::check_ff_features() {
 static int process_hat_value(int p_min, int p_max, int p_value) {
 	int range = (p_max - p_min + 1);
 	int value = p_value - p_min;
-	int hat_value = InputDefault::HAT_MASK_CENTER;
+	int hat_value = Input::HAT_MASK_CENTER;
 	if (range == 4) {
 		value *= 2;
 	}
 
 	switch (value) {
-	case 0:
-		hat_value = InputDefault::HAT_MASK_UP;
-		break;
-	case 1:
-		hat_value = InputDefault::HAT_MASK_UP | InputDefault::HAT_MASK_RIGHT;
-		break;
-	case 2:
-		hat_value = InputDefault::HAT_MASK_RIGHT;
-		break;
-	case 3:
-		hat_value = InputDefault::HAT_MASK_DOWN | InputDefault::HAT_MASK_RIGHT;
-		break;
-	case 4:
-		hat_value = InputDefault::HAT_MASK_DOWN;
-		break;
-	case 5:
-		hat_value = InputDefault::HAT_MASK_DOWN | InputDefault::HAT_MASK_LEFT;
-		break;
-	case 6:
-		hat_value = InputDefault::HAT_MASK_LEFT;
-		break;
-	case 7:
-		hat_value = InputDefault::HAT_MASK_UP | InputDefault::HAT_MASK_LEFT;
-		break;
-	default:
-		hat_value = InputDefault::HAT_MASK_CENTER;
-		break;
+		case 0:
+			hat_value = Input::HAT_MASK_UP;
+			break;
+		case 1:
+			hat_value = Input::HAT_MASK_UP | Input::HAT_MASK_RIGHT;
+			break;
+		case 2:
+			hat_value = Input::HAT_MASK_RIGHT;
+			break;
+		case 3:
+			hat_value = Input::HAT_MASK_DOWN | Input::HAT_MASK_RIGHT;
+			break;
+		case 4:
+			hat_value = Input::HAT_MASK_DOWN;
+			break;
+		case 5:
+			hat_value = Input::HAT_MASK_DOWN | Input::HAT_MASK_LEFT;
+			break;
+		case 6:
+			hat_value = Input::HAT_MASK_LEFT;
+			break;
+		case 7:
+			hat_value = Input::HAT_MASK_UP | Input::HAT_MASK_LEFT;
+			break;
+		default:
+			hat_value = Input::HAT_MASK_CENTER;
+			break;
 	}
 	return hat_value;
 }
 
 void JoypadOSX::poll_joypads() const {
-	while (CFRunLoopRunInMode(GODOT_JOY_LOOP_RUN_MODE,0,TRUE) == kCFRunLoopRunHandledSource) {
+	while (CFRunLoopRunInMode(GODOT_JOY_LOOP_RUN_MODE, 0, TRUE) == kCFRunLoopRunHandledSource) {
 		/* no-op. Pending callbacks will fire. */
 	}
 }
 
-static const InputDefault::JoyAxis axis_correct(int p_value, int p_min, int p_max) {
-	InputDefault::JoyAxis jx;
+static const Input::JoyAxis axis_correct(int p_value, int p_min, int p_max) {
+	Input::JoyAxis jx;
 	if (p_min < 0) {
 		jx.min = -1;
 		if (p_value < 0) {
-			jx.value = (float) -p_value / p_min;
-		}
-		else jx.value = (float) p_value / p_max;
+			jx.value = (float)-p_value / p_min;
+		} else
+			jx.value = (float)p_value / p_max;
 	}
 	if (p_min == 0) {
 		jx.min = 0;
-		jx.value = 0.0f + (float) p_value / p_max;
+		jx.value = 0.0f + (float)p_value / p_max;
 	}
 	return jx;
 }
 
-uint32_t JoypadOSX::process_joypads(uint32_t p_last_id){
+void JoypadOSX::process_joypads() {
 	poll_joypads();
 
 	for (int i = 0; i < device_list.size(); i++) {
-		joypad &joy = device_list[i];
+		joypad &joy = device_list.write[i];
 
 		for (int j = 0; j < joy.axis_elements.size(); j++) {
-			rec_element &elem = joy.axis_elements[j];
+			rec_element &elem = joy.axis_elements.write[j];
 			int value = joy.get_hid_element_state(&elem);
-			p_last_id = input->joy_axis(p_last_id, joy.id, j, axis_correct(value, elem.min, elem.max));
+			input->joy_axis(joy.id, j, axis_correct(value, elem.min, elem.max));
 		}
 		for (int j = 0; j < joy.button_elements.size(); j++) {
-			int value = joy.get_hid_element_state(&joy.button_elements[j]);
-			p_last_id = input->joy_button(p_last_id, joy.id, j, (value>=1));
+			int value = joy.get_hid_element_state(&joy.button_elements.write[j]);
+			input->joy_button(joy.id, j, (value >= 1));
 		}
 		for (int j = 0; j < joy.hat_elements.size(); j++) {
-			rec_element &elem = joy.hat_elements[j];
+			rec_element &elem = joy.hat_elements.write[j];
 			int value = joy.get_hid_element_state(&elem);
 			int hat_value = process_hat_value(elem.min, elem.max, value);
-			p_last_id = input->joy_hat(p_last_id, joy.id, hat_value);
+			input->joy_hat(joy.id, hat_value);
 		}
 
 		if (joy.ffservice) {
@@ -484,19 +478,17 @@ uint32_t JoypadOSX::process_joypads(uint32_t p_last_id){
 				float duration = input->get_joy_vibration_duration(joy.id);
 				if (strength.x == 0 && strength.y == 0) {
 					joypad_vibration_stop(joy.id, timestamp);
-				}
-				else {
+				} else {
 					float gain = MAX(strength.x, strength.y);
 					joypad_vibration_start(joy.id, gain, duration, timestamp);
 				}
 			}
 		}
 	}
-	return p_last_id;
 }
 
 void JoypadOSX::joypad_vibration_start(int p_id, float p_magnitude, float p_duration, uint64_t p_timestamp) {
-	joypad *joy = &device_list[get_joy_index(p_id)];
+	joypad *joy = &device_list.write[get_joy_index(p_id)];
 	joy->ff_timestamp = p_timestamp;
 	joy->ff_effect.dwDuration = p_duration * FF_SECONDS;
 	joy->ff_effect.dwGain = p_magnitude * FF_FFNOMINALMAX;
@@ -505,24 +497,23 @@ void JoypadOSX::joypad_vibration_start(int p_id, float p_magnitude, float p_dura
 }
 
 void JoypadOSX::joypad_vibration_stop(int p_id, uint64_t p_timestamp) {
-	joypad* joy = &device_list[get_joy_index(p_id)];
+	joypad *joy = &device_list.write[get_joy_index(p_id)];
 	joy->ff_timestamp = p_timestamp;
 	FFEffectStop(joy->ff_object);
 }
 
-int JoypadOSX::get_free_joy_id() {
-	for (int i = 0; i < JOYPADS_MAX; i++) {
-		if (!attached_devices[i]) {
-			attached_devices[i] = true;
+int JoypadOSX::get_joy_index(int p_id) const {
+	for (int i = 0; i < device_list.size(); i++) {
+		if (device_list[i].id == p_id)
 			return i;
-		}
 	}
 	return -1;
 }
 
-int JoypadOSX::get_joy_index(int p_id) const {
+int JoypadOSX::get_joy_ref(IOHIDDeviceRef p_device) const {
 	for (int i = 0; i < device_list.size(); i++) {
-		if (device_list[i].id == p_id) return i;
+		if (device_list[i].device_ref == p_device)
+			return i;
 	}
 	return -1;
 }
@@ -536,13 +527,12 @@ bool JoypadOSX::have_device(IOHIDDeviceRef p_device) const {
 	return false;
 }
 
-static CFDictionaryRef create_match_dictionary(const UInt32 page, const UInt32 usage, int *okay)
-{
-	CFDictionaryRef retval = NULL;
+static CFDictionaryRef create_match_dictionary(const UInt32 page, const UInt32 usage, int *okay) {
+	CFDictionaryRef retval = nullptr;
 	CFNumberRef pageNumRef = CFNumberCreate(kCFAllocatorDefault, kCFNumberIntType, &page);
 	CFNumberRef usageNumRef = CFNumberCreate(kCFAllocatorDefault, kCFNumberIntType, &usage);
-	const void *keys[2] = { (void *) CFSTR(kIOHIDDeviceUsagePageKey), (void *) CFSTR(kIOHIDDeviceUsageKey) };
-	const void *vals[2] = { (void *) pageNumRef, (void *) usageNumRef };
+	const void *keys[2] = { (void *)CFSTR(kIOHIDDeviceUsagePageKey), (void *)CFSTR(kIOHIDDeviceUsageKey) };
+	const void *vals[2] = { (void *)pageNumRef, (void *)usageNumRef };
 
 	if (pageNumRef && usageNumRef) {
 		retval = CFDictionaryCreate(kCFAllocatorDefault, keys, vals, 2, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
@@ -563,47 +553,42 @@ static CFDictionaryRef create_match_dictionary(const UInt32 page, const UInt32 u
 }
 
 void JoypadOSX::config_hid_manager(CFArrayRef p_matching_array) const {
-
 	CFRunLoopRef runloop = CFRunLoopGetCurrent();
 	IOReturn ret = IOHIDManagerOpen(hid_manager, kIOHIDOptionsTypeNone);
 	ERR_FAIL_COND(ret != kIOReturnSuccess);
 
 	IOHIDManagerSetDeviceMatchingMultiple(hid_manager, p_matching_array);
-	IOHIDManagerRegisterDeviceMatchingCallback(hid_manager, joypad_added_callback, NULL);
+	IOHIDManagerRegisterDeviceMatchingCallback(hid_manager, joypad_added_callback, nullptr);
+	IOHIDManagerRegisterDeviceRemovalCallback(hid_manager, joypad_removed_callback, nullptr);
 	IOHIDManagerScheduleWithRunLoop(hid_manager, runloop, GODOT_JOY_LOOP_RUN_MODE);
 
-	while (CFRunLoopRunInMode(GODOT_JOY_LOOP_RUN_MODE,0,TRUE) == kCFRunLoopRunHandledSource) {
+	while (CFRunLoopRunInMode(GODOT_JOY_LOOP_RUN_MODE, 0, TRUE) == kCFRunLoopRunHandledSource) {
 		/* no-op. Callback fires once per existing device. */
 	}
 }
 
-JoypadOSX::JoypadOSX()
-{
+JoypadOSX::JoypadOSX(Input *in) {
 	self = this;
-	input = (InputDefault*)Input::get_singleton();
-
-	for (int i = 0; i < JOYPADS_MAX; i++) {
-		attached_devices[i] = false;
-	}
+	input = in;
 
 	int okay = 1;
 	const void *vals[] = {
-		(void *) create_match_dictionary(kHIDPage_GenericDesktop, kHIDUsage_GD_Joystick, &okay),
-		(void *) create_match_dictionary(kHIDPage_GenericDesktop, kHIDUsage_GD_GamePad, &okay),
-		(void *) create_match_dictionary(kHIDPage_GenericDesktop, kHIDUsage_GD_MultiAxisController, &okay),
+		(void *)create_match_dictionary(kHIDPage_GenericDesktop, kHIDUsage_GD_Joystick, &okay),
+		(void *)create_match_dictionary(kHIDPage_GenericDesktop, kHIDUsage_GD_GamePad, &okay),
+		(void *)create_match_dictionary(kHIDPage_GenericDesktop, kHIDUsage_GD_MultiAxisController, &okay),
 	};
-	const size_t n_elements = sizeof(vals)/sizeof(vals[0]);
-	CFArrayRef array = okay ? CFArrayCreate(kCFAllocatorDefault, vals, n_elements, &kCFTypeArrayCallBacks) : NULL;
+	const size_t n_elements = sizeof(vals) / sizeof(vals[0]);
+	CFArrayRef array = okay ? CFArrayCreate(kCFAllocatorDefault, vals, n_elements, &kCFTypeArrayCallBacks) : nullptr;
 
-	for (int i = 0; i < n_elements; i++) {
+	for (size_t i = 0; i < n_elements; i++) {
 		if (vals[i]) {
-			CFRelease((CFTypeRef) vals[i]);
+			CFRelease((CFTypeRef)vals[i]);
 		}
 	}
 
 	if (array) {
 		hid_manager = IOHIDManagerCreate(kCFAllocatorDefault, kIOHIDOptionsTypeNone);
-		if (hid_manager != NULL) {
+		if (hid_manager != nullptr) {
 			config_hid_manager(array);
 		}
 		CFRelease(array);
@@ -611,14 +596,12 @@ JoypadOSX::JoypadOSX()
 }
 
 JoypadOSX::~JoypadOSX() {
-
 	for (int i = 0; i < device_list.size(); i++) {
-		device_list[i].free();
+		device_list.write[i].free();
 	}
 
 	IOHIDManagerUnscheduleFromRunLoop(hid_manager, CFRunLoopGetCurrent(), GODOT_JOY_LOOP_RUN_MODE);
 	IOHIDManagerClose(hid_manager, kIOHIDOptionsTypeNone);
 	CFRelease(hid_manager);
-	hid_manager = NULL;
+	hid_manager = nullptr;
 }
-

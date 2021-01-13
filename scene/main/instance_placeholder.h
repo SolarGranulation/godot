@@ -3,9 +3,10 @@
 /*************************************************************************/
 /*                       This file is part of:                           */
 /*                           GODOT ENGINE                                */
-/*                    http://www.godotengine.org                         */
+/*                      https://godotengine.org                          */
 /*************************************************************************/
-/* Copyright (c) 2007-2017 Juan Linietsky, Ariel Manzur.                 */
+/* Copyright (c) 2007-2021 Juan Linietsky, Ariel Manzur.                 */
+/* Copyright (c) 2014-2021 Godot Engine contributors (cf. AUTHORS.md).   */
 /*                                                                       */
 /* Permission is hereby granted, free of charge, to any person obtaining */
 /* a copy of this software and associated documentation files (the       */
@@ -26,6 +27,7 @@
 /* TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE     */
 /* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                */
 /*************************************************************************/
+
 #ifndef INSTANCE_PLACEHOLDER_H
 #define INSTANCE_PLACEHOLDER_H
 
@@ -34,8 +36,7 @@
 class PackedScene;
 
 class InstancePlaceholder : public Node {
-
-	GDCLASS(InstancePlaceholder,Node);
+	GDCLASS(InstancePlaceholder, Node);
 
 	String path;
 	struct PropSet {
@@ -46,20 +47,19 @@ class InstancePlaceholder : public Node {
 	List<PropSet> stored_values;
 
 protected:
-	bool _set(const StringName& p_name, const Variant& p_value);
-	bool _get(const StringName& p_name,Variant &r_ret) const;
-	void _get_property_list( List<PropertyInfo> *p_list) const;
+	bool _set(const StringName &p_name, const Variant &p_value);
+	bool _get(const StringName &p_name, Variant &r_ret) const;
+	void _get_property_list(List<PropertyInfo> *p_list) const;
 
 	static void _bind_methods();
 
 public:
-
-	void set_instance_path(const String& p_name);
+	void set_instance_path(const String &p_name);
 	String get_instance_path() const;
 
 	Dictionary get_stored_values(bool p_with_order = false);
 
-	void replace_by_instance(const Ref<PackedScene>& p_custom_scene=Ref<PackedScene>());
+	Node *create_instance(bool p_replace = false, const Ref<PackedScene> &p_custom_scene = Ref<PackedScene>());
 
 	InstancePlaceholder();
 };

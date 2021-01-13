@@ -3,9 +3,10 @@
 /*************************************************************************/
 /*                       This file is part of:                           */
 /*                           GODOT ENGINE                                */
-/*                    http://www.godotengine.org                         */
+/*                      https://godotengine.org                          */
 /*************************************************************************/
-/* Copyright (c) 2007-2017 Juan Linietsky, Ariel Manzur.                 */
+/* Copyright (c) 2007-2021 Juan Linietsky, Ariel Manzur.                 */
+/* Copyright (c) 2014-2021 Godot Engine contributors (cf. AUTHORS.md).   */
 /*                                                                       */
 /* Permission is hereby granted, free of charge, to any person obtaining */
 /* a copy of this software and associated documentation files (the       */
@@ -26,103 +27,111 @@
 /* TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE     */
 /* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                */
 /*************************************************************************/
+
 #include "menu_button.h"
-#include "os/keyboard.h"
-#include "scene/main/viewport.h"
 
+#include "core/os/keyboard.h"
+#include "scene/main/window.h"
 
-void MenuButton::_unhandled_key_input(InputEvent p_event) {
+void MenuButton::_unhandled_key_input(Ref<InputEvent> p_event) {
+	if (!_is_focus_owner_in_shorcut_context()) {
+		return;
+	}
 
+	if (disable_shortcuts) {
+		return;
+	}
 
-	if (p_event.is_pressed() && !p_event.is_echo() && (p_event.type==InputEvent::KEY || p_event.type==InputEvent::ACTION || p_event.type==InputEvent::JOYPAD_BUTTON)) {
-
-		if (!get_parent() || !is_visible_in_tree() || is_disabled())
+	if (p_event->is_pressed() && !p_event->is_echo() && (Object::cast_to<InputEventKey>(p_event.ptr()) || Object::cast_to<InputEventJoypadButton>(p_event.ptr()) || Object::cast_to<InputEventAction>(*p_event))) {
+		if (!get_parent() || !is_visible_in_tree() || is_disabled()) {
 			return;
-
-		bool global_only = (get_viewport()->get_modal_stack_top() && !get_viewport()->get_modal_stack_top()->is_a_parent_of(this));
-
-		if (popup->activate_item_by_event(p_event,global_only))
-			accept_event();
-	}
-}
-
-
-void MenuButton::pressed() {
-
-	emit_signal("about_to_show");
-	Size2 size=get_size();
-
-	Point2 gp = get_global_pos();
-	popup->set_global_pos( gp + Size2( 0, size.height ) );
-	popup->set_size( Size2( size.width, 0) );
-	popup->set_parent_rect( Rect2(Point2(gp-popup->get_global_pos()),get_size()));
-	popup->popup();
-	popup->call_deferred("grab_click_focus");
-	popup->set_invalidate_click_until_motion();
-
-}
-
-void MenuButton::_gui_input(InputEvent p_event) {
-
-	/*if (p_event.type==InputEvent::MOUSE_BUTTON && p_event.mouse_button.button_index==BUTTON_LEFT) {
-		clicked=p_event.mouse_button.pressed;
-	}
-	if (clicked && p_event.type==InputEvent::MOUSE_MOTION && popup->is_visible_in_tree()) {
-
-		Point2 gt = Point2(p_event.mouse_motion.x,p_event.mouse_motion.y);
-		gt = get_global_transform().xform(gt);
-		Point2 lt = popup->get_transform().affine_inverse().xform(gt);
-		if (popup->has_point(lt)) {
-			//print_line("HAS POINT!!!");
-			popup->call_deferred("grab_click_focus");
 		}
 
-	}*/
+		if (popup->activate_item_by_event(p_event, false)) {
+			accept_event();
+		}
+	}
+}
 
+void MenuButton::pressed() {
+	Size2 size = get_size();
+
+	Point2 gp = get_screen_position();
+	gp.y += get_size().y;
+
+	popup->set_position(gp);
+
+	popup->set_size(Size2(size.width, 0));
+	popup->set_parent_rect(Rect2(Point2(gp - popup->get_position()), get_size()));
+	popup->take_mouse_focus();
+	popup->popup();
+}
+
+void MenuButton::_gui_input(Ref<InputEvent> p_event) {
 	BaseButton::_gui_input(p_event);
 }
 
-PopupMenu *MenuButton::get_popup() {
-
+PopupMenu *MenuButton::get_popup() const {
 	return popup;
 }
 
-Array MenuButton::_get_items() const {
+void MenuButton::_set_items(const Array &p_items) {
+	popup->set("items", p_items);
+}
 
+Array MenuButton::_get_items() const {
 	return popup->get("items");
 }
-void MenuButton::_set_items(const Array& p_items) {
 
-	popup->set("items",p_items);
+void MenuButton::set_switch_on_hover(bool p_enabled) {
+	switch_on_hover = p_enabled;
+}
+
+bool MenuButton::is_switch_on_hover() {
+	return switch_on_hover;
+}
+
+void MenuButton::_notification(int p_what) {
+	if (p_what == NOTIFICATION_VISIBILITY_CHANGED) {
+		if (!is_visible_in_tree()) {
+			popup->hide();
+		}
+	}
 }
 
 void MenuButton::_bind_methods() {
+	ClassDB::bind_method(D_METHOD("get_popup"), &MenuButton::get_popup);
+	ClassDB::bind_method(D_METHOD("_set_items"), &MenuButton::_set_items);
+	ClassDB::bind_method(D_METHOD("_get_items"), &MenuButton::_get_items);
+	ClassDB::bind_method(D_METHOD("set_switch_on_hover", "enable"), &MenuButton::set_switch_on_hover);
+	ClassDB::bind_method(D_METHOD("is_switch_on_hover"), &MenuButton::is_switch_on_hover);
+	ClassDB::bind_method(D_METHOD("set_disable_shortcuts", "disabled"), &MenuButton::set_disable_shortcuts);
 
-	ClassDB::bind_method(_MD("get_popup:PopupMenu"),&MenuButton::get_popup);
-	ClassDB::bind_method(_MD("_unhandled_key_input"),&MenuButton::_unhandled_key_input);
-	ClassDB::bind_method(_MD("_set_items"),&MenuButton::_set_items);
-	ClassDB::bind_method(_MD("_get_items"),&MenuButton::_get_items);
+	ADD_PROPERTY(PropertyInfo(Variant::ARRAY, "items", PROPERTY_HINT_NONE, "", PROPERTY_USAGE_NOEDITOR | PROPERTY_USAGE_INTERNAL), "_set_items", "_get_items");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "switch_on_hover"), "set_switch_on_hover", "is_switch_on_hover");
 
-	ADD_PROPERTY( PropertyInfo(Variant::ARRAY,"items",PROPERTY_HINT_NONE,"",PROPERTY_USAGE_NOEDITOR), _SCS("_set_items"),_SCS("_get_items") );
-
-	ADD_SIGNAL( MethodInfo("about_to_show") );
+	ADD_SIGNAL(MethodInfo("about_to_popup"));
 }
+
+void MenuButton::set_disable_shortcuts(bool p_disabled) {
+	disable_shortcuts = p_disabled;
+}
+
 MenuButton::MenuButton() {
-
-
+	switch_on_hover = false;
 	set_flat(true);
-	set_enabled_focus_mode(FOCUS_NONE);
-	popup = memnew( PopupMenu );
+	set_toggle_mode(true);
+	set_disable_shortcuts(false);
+	set_process_unhandled_key_input(true);
+	set_focus_mode(FOCUS_NONE);
+	set_action_mode(ACTION_MODE_BUTTON_PRESS);
+
+	popup = memnew(PopupMenu);
 	popup->hide();
 	add_child(popup);
-	popup->set_as_toplevel(true);
-	set_process_unhandled_key_input(true);
-	set_action_mode(ACTION_MODE_BUTTON_PRESS);
+	popup->connect("about_to_popup", callable_mp((BaseButton *)this, &BaseButton::set_pressed), varray(true)); // For when switching from another MenuButton.
+	popup->connect("popup_hide", callable_mp((BaseButton *)this, &BaseButton::set_pressed), varray(false));
 }
-
 
 MenuButton::~MenuButton() {
-
 }
-
-

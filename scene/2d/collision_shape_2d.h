@@ -3,9 +3,10 @@
 /*************************************************************************/
 /*                       This file is part of:                           */
 /*                           GODOT ENGINE                                */
-/*                    http://www.godotengine.org                         */
+/*                      https://godotengine.org                          */
 /*************************************************************************/
-/* Copyright (c) 2007-2017 Juan Linietsky, Ariel Manzur.                 */
+/* Copyright (c) 2007-2021 Juan Linietsky, Ariel Manzur.                 */
+/* Copyright (c) 2014-2021 Godot Engine contributors (cf. AUTHORS.md).   */
 /*                                                                       */
 /* Permission is hereby granted, free of charge, to any person obtaining */
 /* a copy of this software and associated documentation files (the       */
@@ -26,44 +27,52 @@
 /* TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE     */
 /* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                */
 /*************************************************************************/
+
 #ifndef COLLISION_SHAPE_2D_H
 #define COLLISION_SHAPE_2D_H
 
 #include "scene/2d/node_2d.h"
 #include "scene/resources/shape_2d.h"
 
-class CollisionShape2D : public Node2D {
+class CollisionObject2D;
 
-	GDCLASS(CollisionShape2D,Node2D);
+class CollisionShape2D : public Node2D {
+	GDCLASS(CollisionShape2D, Node2D);
 	Ref<Shape2D> shape;
 	Rect2 rect;
-	bool trigger;
-	bool unparenting;
-	bool can_update_body;
+	uint32_t owner_id;
+	CollisionObject2D *parent;
 	void _shape_changed();
-	int update_shape_index;
+	bool disabled;
+	bool one_way_collision;
+	float one_way_collision_margin;
 
-	void _set_update_shape_index(int p_index);
-	int _get_update_shape_index() const;
+	void _update_in_shape_owner(bool p_xform_only = false);
 
 protected:
-
-	void _update_parent();
 	void _notification(int p_what);
 	static void _bind_methods();
 
-	void _add_to_collision_object(Object *p_obj);
 public:
+#ifdef TOOLS_ENABLED
+	virtual bool _edit_is_selected_on_click(const Point2 &p_point, double p_tolerance) const override;
+#else
+	virtual bool _edit_is_selected_on_click(const Point2 &p_point, double p_tolerance) const;
+#endif // TOOLS_ENABLED
 
-	void set_shape(const Ref<Shape2D>& p_shape);
+	void set_shape(const Ref<Shape2D> &p_shape);
 	Ref<Shape2D> get_shape() const;
-	virtual Rect2 get_item_rect() const;
-	void set_trigger(bool p_trigger);
-	bool is_trigger() const;
 
-	int get_collision_object_shape_index() const { return _get_update_shape_index(); }
+	void set_disabled(bool p_disabled);
+	bool is_disabled() const;
 
-	virtual String get_configuration_warning() const;
+	void set_one_way_collision(bool p_enable);
+	bool is_one_way_collision_enabled() const;
+
+	void set_one_way_collision_margin(float p_margin);
+	float get_one_way_collision_margin() const;
+
+	virtual String get_configuration_warning() const override;
 
 	CollisionShape2D();
 };

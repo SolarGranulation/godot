@@ -3,9 +3,10 @@
 /*************************************************************************/
 /*                       This file is part of:                           */
 /*                           GODOT ENGINE                                */
-/*                    http://www.godotengine.org                         */
+/*                      https://godotengine.org                          */
 /*************************************************************************/
-/* Copyright (c) 2007-2017 Juan Linietsky, Ariel Manzur.                 */
+/* Copyright (c) 2007-2021 Juan Linietsky, Ariel Manzur.                 */
+/* Copyright (c) 2014-2021 Godot Engine contributors (cf. AUTHORS.md).   */
 /*                                                                       */
 /* Permission is hereby granted, free of charge, to any person obtaining */
 /* a copy of this software and associated documentation files (the       */
@@ -26,54 +27,47 @@
 /* TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE     */
 /* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                */
 /*************************************************************************/
+
 #ifndef MAIN_LOOP_H
 #define MAIN_LOOP_H
 
-#include "os/input_event.h"
-#include "reference.h"
-#include "script_language.h"
-/**
-	@author Juan Linietsky <reduzio@gmail.com>
-*/
-class MainLoop : public Object {
+#include "core/input/input_event.h"
+#include "core/object/reference.h"
+#include "core/object/script_language.h"
 
-	GDCLASS( MainLoop, Object );
+class MainLoop : public Object {
+	GDCLASS(MainLoop, Object);
 	OBJ_CATEGORY("Main Loop");
 
-	Ref<Script> init_script;
+	Ref<Script> initialize_script;
+
 protected:
 	static void _bind_methods();
 
 public:
-
 	enum {
-		NOTIFICATION_WM_MOUSE_ENTER = 2,
-		NOTIFICATION_WM_MOUSE_EXIT = 3,
-		NOTIFICATION_WM_FOCUS_IN = 4,
-		NOTIFICATION_WM_FOCUS_OUT = 5,
-		NOTIFICATION_WM_QUIT_REQUEST = 6,
-		NOTIFICATION_WM_GO_BACK_REQUEST = 7,
-		NOTIFICATION_WM_UNFOCUS_REQUEST = 8,
-		NOTIFICATION_OS_MEMORY_WARNING = 9,
-		NOTIFICATION_TRANSLATION_CHANGED = 10,
+		//make sure these are replicated in Node
+		NOTIFICATION_OS_MEMORY_WARNING = 2009,
+		NOTIFICATION_TRANSLATION_CHANGED = 2010,
+		NOTIFICATION_WM_ABOUT = 2011,
+		NOTIFICATION_CRASH = 2012,
+		NOTIFICATION_OS_IME_UPDATE = 2013,
+		NOTIFICATION_APPLICATION_RESUMED = 2014,
+		NOTIFICATION_APPLICATION_PAUSED = 2015,
+		NOTIFICATION_APPLICATION_FOCUS_IN = 2016,
+		NOTIFICATION_APPLICATION_FOCUS_OUT = 2017,
+		NOTIFICATION_TEXT_SERVER_CHANGED = 2018,
 	};
 
-	virtual void input_event( const InputEvent& p_event );
-	virtual void input_text( const String& p_text );
+	virtual void initialize();
+	virtual bool physics_process(float p_time);
+	virtual bool process(float p_time);
+	virtual void finalize();
 
-	virtual void init();
-	virtual bool iteration(float p_time);
-	virtual bool idle(float p_time);
-	virtual void finish();
+	void set_initialize_script(const Ref<Script> &p_initialize_script);
 
-	virtual void drop_files(const Vector<String>& p_files,int p_from_screen=0);
-
-	void set_init_script(const Ref<Script>& p_init_script);
-
-	MainLoop();
-	virtual ~MainLoop();
-
-
+	MainLoop() {}
+	virtual ~MainLoop() {}
 };
 
-#endif
+#endif // MAIN_LOOP_H

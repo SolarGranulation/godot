@@ -3,9 +3,10 @@
 /*************************************************************************/
 /*                       This file is part of:                           */
 /*                           GODOT ENGINE                                */
-/*                    http://www.godotengine.org                         */
+/*                      https://godotengine.org                          */
 /*************************************************************************/
-/* Copyright (c) 2007-2017 Juan Linietsky, Ariel Manzur.                 */
+/* Copyright (c) 2007-2021 Juan Linietsky, Ariel Manzur.                 */
+/* Copyright (c) 2014-2021 Godot Engine contributors (cf. AUTHORS.md).   */
 /*                                                                       */
 /* Permission is hereby granted, free of charge, to any person obtaining */
 /* a copy of this software and associated documentation files (the       */
@@ -26,20 +27,21 @@
 /* TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE     */
 /* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                */
 /*************************************************************************/
+
 #include "register_types.h"
 
 #include "video_stream_webm.h"
 
-static ResourceFormatLoaderVideoStreamWebm *webm_stream_loader = NULL;
+static Ref<ResourceFormatLoaderWebm> resource_loader_webm;
 
 void register_webm_types() {
+	resource_loader_webm.instance();
+	ResourceLoader::add_resource_format_loader(resource_loader_webm, true);
 
-	webm_stream_loader = memnew(ResourceFormatLoaderVideoStreamWebm);
-	ResourceLoader::add_resource_format_loader(webm_stream_loader);
 	ClassDB::register_class<VideoStreamWebm>();
 }
 
 void unregister_webm_types() {
-
-	memdelete(webm_stream_loader);
+	ResourceLoader::remove_resource_format_loader(resource_loader_webm);
+	resource_loader_webm.unref();
 }

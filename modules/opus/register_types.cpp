@@ -3,9 +3,10 @@
 /*************************************************************************/
 /*                       This file is part of:                           */
 /*                           GODOT ENGINE                                */
-/*                    http://www.godotengine.org                         */
+/*                      https://godotengine.org                          */
 /*************************************************************************/
-/* Copyright (c) 2007-2017 Juan Linietsky, Ariel Manzur.                 */
+/* Copyright (c) 2007-2021 Juan Linietsky, Ariel Manzur.                 */
+/* Copyright (c) 2014-2021 Godot Engine contributors (cf. AUTHORS.md).   */
 /*                                                                       */
 /* Permission is hereby granted, free of charge, to any person obtaining */
 /* a copy of this software and associated documentation files (the       */
@@ -26,20 +27,11 @@
 /* TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE     */
 /* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                */
 /*************************************************************************/
+
 #include "register_types.h"
 
-#include "audio_stream_opus.h"
+// Dummy module as libvorbis is needed by other modules (theora ...)
 
-static ResourceFormatLoaderAudioStreamOpus *opus_stream_loader = NULL;
+void register_opus_types() {}
 
-void register_opus_types() {
-
-	opus_stream_loader = memnew( ResourceFormatLoaderAudioStreamOpus );
-	ResourceLoader::add_resource_format_loader(opus_stream_loader);
-	ClassDB::register_class<AudioStreamOpus>();
-}
-
-void unregister_opus_types() {
-
-	memdelete( opus_stream_loader );
-}
+void unregister_opus_types() {}

@@ -3,9 +3,10 @@
 /*************************************************************************/
 /*                       This file is part of:                           */
 /*                           GODOT ENGINE                                */
-/*                    http://www.godotengine.org                         */
+/*                      https://godotengine.org                          */
 /*************************************************************************/
-/* Copyright (c) 2007-2017 Juan Linietsky, Ariel Manzur.                 */
+/* Copyright (c) 2007-2021 Juan Linietsky, Ariel Manzur.                 */
+/* Copyright (c) 2014-2021 Godot Engine contributors (cf. AUTHORS.md).   */
 /*                                                                       */
 /* Permission is hereby granted, free of charge, to any person obtaining */
 /* a copy of this software and associated documentation files (the       */
@@ -28,16 +29,13 @@
 /*************************************************************************/
 
 #include "register_types.h"
-#include "class_db.h"
+#include "core/object/class_db.h"
 #include "regex.h"
 
 void register_regex_types() {
-
 	ClassDB::register_class<RegExMatch>();
 	ClassDB::register_class<RegEx>();
 }
 
 void unregister_regex_types() {
-
 }
-

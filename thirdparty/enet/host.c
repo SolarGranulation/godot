@@ -87,7 +87,7 @@ enet_host_create (const ENetAddress * address, size_t peerCount, size_t channelL
     host -> commandCount = 0;
     host -> bufferCount = 0;
     host -> checksum = NULL;
-    host -> receivedAddress.host = ENET_HOST_ANY;
+    memset(host -> receivedAddress.host, 0, 16);
     host -> receivedAddress.port = 0;
     host -> receivedData = NULL;
     host -> receivedDataLength = 0;
@@ -124,8 +124,7 @@ enet_host_create (const ENetAddress * address, size_t peerCount, size_t channelL
        enet_list_clear (& currentPeer -> acknowledgements);
        enet_list_clear (& currentPeer -> sentReliableCommands);
        enet_list_clear (& currentPeer -> sentUnreliableCommands);
-       enet_list_clear (& currentPeer -> outgoingReliableCommands);
-       enet_list_clear (& currentPeer -> outgoingUnreliableCommands);
+       enet_list_clear (& currentPeer -> outgoingCommands);
        enet_list_clear (& currentPeer -> dispatchedCommands);
 
        enet_peer_reset (currentPeer);

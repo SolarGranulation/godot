@@ -1,75 +1,90 @@
-//
-// C++ Interface: reverb
-//
-// Description:
-//
-//
+/*************************************************************************/
+/*  reverb.h                                                             */
+/*************************************************************************/
+/*                       This file is part of:                           */
+/*                           GODOT ENGINE                                */
+/*                      https://godotengine.org                          */
+/*************************************************************************/
+/* Copyright (c) 2007-2021 Juan Linietsky, Ariel Manzur.                 */
+/* Copyright (c) 2014-2021 Godot Engine contributors (cf. AUTHORS.md).   */
+/*                                                                       */
+/* Permission is hereby granted, free of charge, to any person obtaining */
+/* a copy of this software and associated documentation files (the       */
+/* "Software"), to deal in the Software without restriction, including   */
+/* without limitation the rights to use, copy, modify, merge, publish,   */
+/* distribute, sublicense, and/or sell copies of the Software, and to    */
+/* permit persons to whom the Software is furnished to do so, subject to */
+/* the following conditions:                                             */
+/*                                                                       */
+/* The above copyright notice and this permission notice shall be        */
+/* included in all copies or substantial portions of the Software.       */
+/*                                                                       */
+/* THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,       */
+/* EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF    */
+/* MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.*/
+/* IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY  */
+/* CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,  */
+/* TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE     */
+/* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                */
+/*************************************************************************/
+
 // Author: Juan Linietsky <reduzio@gmail.com>, (C) 2006
-//
-// Copyright: See COPYING file that comes with this distribution
-//
-//
+
 #ifndef REVERB_H
 #define REVERB_H
 
-#include "typedefs.h"
-#include "os/memory.h"
-#include "audio_frame.h"
+#include "core/math/audio_frame.h"
+#include "core/os/memory.h"
+#include "core/typedefs.h"
 
 class Reverb {
 public:
 	enum {
-		INPUT_BUFFER_MAX_SIZE=1024,
+		INPUT_BUFFER_MAX_SIZE = 1024,
 
 	};
+
 private:
 	enum {
-
-		MAX_COMBS=8,
-		MAX_ALLPASS=4,
-		MAX_ECHO_MS=500
+		MAX_COMBS = 8,
+		MAX_ALLPASS = 4,
+		MAX_ECHO_MS = 500
 
 	};
-
-
 
 	static const float comb_tunings[MAX_COMBS];
 	static const float allpass_tunings[MAX_ALLPASS];
 
 	struct Comb {
+		int size = 0;
+		float *buffer = nullptr;
+		float feedback = 0;
+		float damp = 0; //lowpass
+		float damp_h = 0; //history
+		int pos = 0;
+		int extra_spread_frames = 0;
 
-		int size;
-		float *buffer;
-		float feedback;
-		float damp; //lowpass
-		float damp_h; //history
-		int pos;
-		int extra_spread_frames;
-
-		Comb() { size=0; buffer=0; feedback=0; damp_h=0; pos=0; }
+		Comb() {}
 	};
 
 	struct AllPass {
-
-		int size;
-		float *buffer;
-		int pos;
-		int extra_spread_frames;
-		AllPass() { size=0; buffer=0; pos=0; }
+		int size = 0;
+		float *buffer = nullptr;
+		int pos = 0;
+		int extra_spread_frames = 0;
+		AllPass() {}
 	};
 
 	Comb comb[MAX_COMBS];
 	AllPass allpass[MAX_ALLPASS];
 	float *input_buffer;
-	float *echo_buffer;
+	float *echo_buffer = nullptr;
 	int echo_buffer_size;
 	int echo_buffer_pos;
 
-	float hpf_h1,hpf_h2;
-
+	float hpf_h1, hpf_h2 = 0;
 
 	struct Parameters {
-
 		float room_size;
 		float damp;
 		float wet;
@@ -85,8 +100,8 @@ private:
 	void configure_buffers();
 	void update_parameters();
 	void clear_buffers();
-public:
 
+public:
 	void set_room_size(float p_size);
 	void set_damp(float p_damp);
 	void set_wet(float p_wet);
@@ -98,14 +113,11 @@ public:
 	void set_extra_spread(float p_spread);
 	void set_extra_spread_base(float p_sec);
 
-	void process(float *p_src,float *p_dst,int p_frames);
+	void process(float *p_src, float *p_dst, int p_frames);
 
 	Reverb();
 
 	~Reverb();
-
 };
-
-
 
 #endif

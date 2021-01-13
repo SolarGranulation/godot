@@ -3,9 +3,10 @@
 /*************************************************************************/
 /*                       This file is part of:                           */
 /*                           GODOT ENGINE                                */
-/*                    http://www.godotengine.org                         */
+/*                      https://godotengine.org                          */
 /*************************************************************************/
-/* Copyright (c) 2007-2017 Juan Linietsky, Ariel Manzur.                 */
+/* Copyright (c) 2007-2021 Juan Linietsky, Ariel Manzur.                 */
+/* Copyright (c) 2014-2021 Godot Engine contributors (cf. AUTHORS.md).   */
 /*                                                                       */
 /* Permission is hereby granted, free of charge, to any person obtaining */
 /* a copy of this software and associated documentation files (the       */
@@ -26,415 +27,860 @@
 /* TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE     */
 /* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                */
 /*************************************************************************/
-#include "a_star.h"
-#include "geometry.h"
 
+#include "a_star.h"
+
+#include "core/math/geometry_3d.h"
+#include "core/object/script_language.h"
+#include "scene/scene_string_names.h"
 
 int AStar::get_available_point_id() const {
-
-	if (points.empty()) {
+	if (points.is_empty()) {
 		return 1;
 	}
 
-	return points.back()->key()+1;
+	// calculate our new next available point id if bigger than before or next id already contained in set of points.
+	if (points.has(last_free_id)) {
+		int cur_new_id = last_free_id;
+		while (points.has(cur_new_id)) {
+			cur_new_id++;
+		}
+		int &non_const = const_cast<int &>(last_free_id);
+		non_const = cur_new_id;
+	}
+
+	return last_free_id;
 }
 
 void AStar::add_point(int p_id, const Vector3 &p_pos, real_t p_weight_scale) {
-	ERR_FAIL_COND(p_id<0);
-	if (!points.has(p_id)) {
-		Point *pt = memnew( Point );
-		pt->id=p_id;
-		pt->pos=p_pos;
-		pt->weight_scale=p_weight_scale;
-		pt->prev_point=NULL;
-		pt->last_pass=0;
-		points[p_id]=pt;
+	ERR_FAIL_COND(p_id < 0);
+	ERR_FAIL_COND(p_weight_scale < 1);
+
+	Point *found_pt;
+	bool p_exists = points.lookup(p_id, found_pt);
+
+	if (!p_exists) {
+		Point *pt = memnew(Point);
+		pt->id = p_id;
+		pt->pos = p_pos;
+		pt->weight_scale = p_weight_scale;
+		pt->prev_point = nullptr;
+		pt->open_pass = 0;
+		pt->closed_pass = 0;
+		pt->enabled = true;
+		points.set(p_id, pt);
 	} else {
-		points[p_id]->pos=p_pos;
-		points[p_id]->weight_scale=p_weight_scale;
+		found_pt->pos = p_pos;
+		found_pt->weight_scale = p_weight_scale;
 	}
 }
 
-Vector3 AStar::get_point_pos(int p_id) const{
+Vector3 AStar::get_point_position(int p_id) const {
+	Point *p;
+	bool p_exists = points.lookup(p_id, p);
+	ERR_FAIL_COND_V(!p_exists, Vector3());
 
-	ERR_FAIL_COND_V(!points.has(p_id),Vector3());
-
-	return points[p_id]->pos;
-
+	return p->pos;
 }
-real_t AStar::get_point_weight_scale(int p_id) const{
 
-	ERR_FAIL_COND_V(!points.has(p_id),0);
+void AStar::set_point_position(int p_id, const Vector3 &p_pos) {
+	Point *p;
+	bool p_exists = points.lookup(p_id, p);
+	ERR_FAIL_COND(!p_exists);
 
-	return points[p_id]->weight_scale;
-
+	p->pos = p_pos;
 }
-void AStar::remove_point(int p_id){
 
-	ERR_FAIL_COND(!points.has(p_id));
+real_t AStar::get_point_weight_scale(int p_id) const {
+	Point *p;
+	bool p_exists = points.lookup(p_id, p);
+	ERR_FAIL_COND_V(!p_exists, 0);
 
-	Point* p = points[p_id];
+	return p->weight_scale;
+}
 
-	for(int i=0;i<p->neighbours.size();i++) {
+void AStar::set_point_weight_scale(int p_id, real_t p_weight_scale) {
+	Point *p;
+	bool p_exists = points.lookup(p_id, p);
+	ERR_FAIL_COND(!p_exists);
+	ERR_FAIL_COND(p_weight_scale < 1);
 
-		Segment s(p_id,p->neighbours[i]->id);
+	p->weight_scale = p_weight_scale;
+}
+
+void AStar::remove_point(int p_id) {
+	Point *p;
+	bool p_exists = points.lookup(p_id, p);
+	ERR_FAIL_COND(!p_exists);
+
+	for (OAHashMap<int, Point *>::Iterator it = p->neighbours.iter(); it.valid; it = p->neighbours.next_iter(it)) {
+		Segment s(p_id, (*it.key));
 		segments.erase(s);
-		p->neighbours[i]->neighbours.erase(p);
+
+		(*it.value)->neighbours.remove(p->id);
+		(*it.value)->unlinked_neighbours.remove(p->id);
+	}
+
+	for (OAHashMap<int, Point *>::Iterator it = p->unlinked_neighbours.iter(); it.valid; it = p->unlinked_neighbours.next_iter(it)) {
+		Segment s(p_id, (*it.key));
+		segments.erase(s);
+
+		(*it.value)->neighbours.remove(p->id);
+		(*it.value)->unlinked_neighbours.remove(p->id);
 	}
 
 	memdelete(p);
-	points.erase(p_id);
+	points.remove(p_id);
+	last_free_id = p_id;
 }
 
-void AStar::connect_points(int p_id,int p_with_id){
+void AStar::connect_points(int p_id, int p_with_id, bool bidirectional) {
+	ERR_FAIL_COND(p_id == p_with_id);
 
-	ERR_FAIL_COND(!points.has(p_id));
-	ERR_FAIL_COND(!points.has(p_with_id));
-	ERR_FAIL_COND(p_id==p_with_id);
+	Point *a;
+	bool from_exists = points.lookup(p_id, a);
+	ERR_FAIL_COND(!from_exists);
 
+	Point *b;
+	bool to_exists = points.lookup(p_with_id, b);
+	ERR_FAIL_COND(!to_exists);
 
-	Point* a = points[p_id];
-	Point* b = points[p_with_id];
-	a->neighbours.push_back(b);
-	b->neighbours.push_back(a);
+	a->neighbours.set(b->id, b);
 
-	Segment s(p_id,p_with_id);
-	if (s.from==p_id) {
-		s.from_point=a;
-		s.to_point=b;
+	if (bidirectional) {
+		b->neighbours.set(a->id, a);
 	} else {
-		s.from_point=b;
-		s.to_point=a;
+		b->unlinked_neighbours.set(a->id, a);
+	}
+
+	Segment s(p_id, p_with_id);
+	if (bidirectional) {
+		s.direction = Segment::BIDIRECTIONAL;
+	}
+
+	Set<Segment>::Element *element = segments.find(s);
+	if (element != nullptr) {
+		s.direction |= element->get().direction;
+		if (s.direction == Segment::BIDIRECTIONAL) {
+			// Both are neighbours of each other now
+			a->unlinked_neighbours.remove(b->id);
+			b->unlinked_neighbours.remove(a->id);
+		}
+		segments.erase(element);
 	}
 
 	segments.insert(s);
-
-
-}
-void AStar::disconnect_points(int p_id,int p_with_id){
-
-	Segment s(p_id,p_with_id);
-	ERR_FAIL_COND(!segments.has(s));
-
-
-	segments.erase(s);
-
-	Point *a = points[p_id];
-	Point *b = points[p_with_id];
-	a->neighbours.erase(b);
-	b->neighbours.erase(a);
-
-}
-bool AStar::are_points_connected(int p_id,int p_with_id) const{
-
-	Segment s(p_id,p_with_id);
-	return segments.has(s);
 }
 
-void AStar::clear(){
+void AStar::disconnect_points(int p_id, int p_with_id, bool bidirectional) {
+	Point *a;
+	bool a_exists = points.lookup(p_id, a);
+	ERR_FAIL_COND(!a_exists);
 
-	for (const Map<int,Point*>::Element *E=points.front();E;E=E->next()) {
+	Point *b;
+	bool b_exists = points.lookup(p_with_id, b);
+	ERR_FAIL_COND(!b_exists);
 
-		memdelete(E->get());
+	Segment s(p_id, p_with_id);
+	int remove_direction = bidirectional ? (int)Segment::BIDIRECTIONAL : s.direction;
+
+	Set<Segment>::Element *element = segments.find(s);
+	if (element != nullptr) {
+		// s is the new segment
+		// Erase the directions to be removed
+		s.direction = (element->get().direction & ~remove_direction);
+
+		a->neighbours.remove(b->id);
+		if (bidirectional) {
+			b->neighbours.remove(a->id);
+			if (element->get().direction != Segment::BIDIRECTIONAL) {
+				a->unlinked_neighbours.remove(b->id);
+				b->unlinked_neighbours.remove(a->id);
+			}
+		} else {
+			if (s.direction == Segment::NONE) {
+				b->unlinked_neighbours.remove(a->id);
+			} else {
+				a->unlinked_neighbours.set(b->id, b);
+			}
+		}
+
+		segments.erase(element);
+		if (s.direction != Segment::NONE) {
+			segments.insert(s);
+		}
+	}
+}
+
+bool AStar::has_point(int p_id) const {
+	return points.has(p_id);
+}
+
+Array AStar::get_points() {
+	Array point_list;
+
+	for (OAHashMap<int, Point *>::Iterator it = points.iter(); it.valid; it = points.next_iter(it)) {
+		point_list.push_back(*(it.key));
+	}
+
+	return point_list;
+}
+
+Vector<int> AStar::get_point_connections(int p_id) {
+	Point *p;
+	bool p_exists = points.lookup(p_id, p);
+	ERR_FAIL_COND_V(!p_exists, Vector<int>());
+
+	Vector<int> point_list;
+
+	for (OAHashMap<int, Point *>::Iterator it = p->neighbours.iter(); it.valid; it = p->neighbours.next_iter(it)) {
+		point_list.push_back((*it.key));
+	}
+
+	return point_list;
+}
+
+bool AStar::are_points_connected(int p_id, int p_with_id, bool bidirectional) const {
+	Segment s(p_id, p_with_id);
+	const Set<Segment>::Element *element = segments.find(s);
+
+	return element != nullptr &&
+		   (bidirectional || (element->get().direction & s.direction) == s.direction);
+}
+
+void AStar::clear() {
+	last_free_id = 0;
+	for (OAHashMap<int, Point *>::Iterator it = points.iter(); it.valid; it = points.next_iter(it)) {
+		memdelete(*(it.value));
 	}
 	segments.clear();
 	points.clear();
 }
 
+int AStar::get_point_count() const {
+	return points.get_num_elements();
+}
 
-int AStar::get_closest_point(const Vector3& p_point) const{
+int AStar::get_point_capacity() const {
+	return points.get_capacity();
+}
 
-	int closest_id=-1;
-	real_t closest_dist=1e20;
+void AStar::reserve_space(int p_num_nodes) {
+	ERR_FAIL_COND_MSG(p_num_nodes <= 0, "New capacity must be greater than 0, was: " + itos(p_num_nodes) + ".");
+	ERR_FAIL_COND_MSG((uint32_t)p_num_nodes < points.get_capacity(), "New capacity must be greater than current capacity: " + itos(points.get_capacity()) + ", new was: " + itos(p_num_nodes) + ".");
+	points.reserve(p_num_nodes);
+}
 
-	for (const Map<int,Point*>::Element *E=points.front();E;E=E->next()) {
+int AStar::get_closest_point(const Vector3 &p_point, bool p_include_disabled) const {
+	int closest_id = -1;
+	real_t closest_dist = 1e20;
 
-		real_t d = p_point.distance_squared_to(E->get()->pos);
-		if (closest_id<0 || d<closest_dist) {
-			closest_dist=d;
-			closest_id=E->key();
+	for (OAHashMap<int, Point *>::Iterator it = points.iter(); it.valid; it = points.next_iter(it)) {
+		if (!p_include_disabled && !(*it.value)->enabled) {
+			continue; // Disabled points should not be considered.
+		}
+
+		// Keep the closest point's ID, and in case of multiple closest IDs,
+		// the smallest one (makes it deterministic).
+		real_t d = p_point.distance_squared_to((*it.value)->pos);
+		int id = *(it.key);
+		if (d <= closest_dist) {
+			if (d == closest_dist && id > closest_id) { // Keep lowest ID.
+				continue;
+			}
+			closest_dist = d;
+			closest_id = id;
 		}
 	}
 
 	return closest_id;
-
-
 }
-Vector3 AStar::get_closest_pos_in_segment(const Vector3& p_point) const {
 
+Vector3 AStar::get_closest_position_in_segment(const Vector3 &p_point) const {
 	real_t closest_dist = 1e20;
-	bool found=false;
 	Vector3 closest_point;
 
+	for (const Set<Segment>::Element *E = segments.front(); E; E = E->next()) {
+		Point *from_point = nullptr, *to_point = nullptr;
+		points.lookup(E->get().u, from_point);
+		points.lookup(E->get().v, to_point);
 
-	for (const Set<Segment>::Element *E=segments.front();E;E=E->next()) {
+		if (!(from_point->enabled && to_point->enabled)) {
+			continue;
+		}
 
-		Vector3 segment[2]={
-			E->get().from_point->pos,
-			E->get().to_point->pos,
+		Vector3 segment[2] = {
+			from_point->pos,
+			to_point->pos,
 		};
 
-		Vector3 p = Geometry::get_closest_point_to_segment(p_point,segment);
+		Vector3 p = Geometry3D::get_closest_point_to_segment(p_point, segment);
 		real_t d = p_point.distance_squared_to(p);
-		if (!found || d<closest_dist) {
-
-			closest_point=p;
-			closest_dist=d;
-			found=true;
+		if (d < closest_dist) {
+			closest_point = p;
+			closest_dist = d;
 		}
 	}
 
 	return closest_point;
 }
 
-bool AStar::_solve(Point* begin_point, Point* end_point) {
-
+bool AStar::_solve(Point *begin_point, Point *end_point) {
 	pass++;
 
-	SelfList<Point>::List open_list;
-
-	bool found_route=false;
-
-
-	for(int i=0;i<begin_point->neighbours.size();i++) {
-
-		Point *n = begin_point->neighbours[i];
-		n->prev_point=begin_point;
-		n->distance=n->pos.distance_to(begin_point->pos);
-		n->distance*=n->weight_scale;
-		n->last_pass=pass;
-		open_list.add(&n->list);
-
-		if (end_point==n) {
-			found_route=true;
-			break;
-		}
+	if (!end_point->enabled) {
+		return false;
 	}
 
-	while(!found_route) {
+	bool found_route = false;
 
-		if (open_list.first()==NULL) {
-			//could not find path sadly
+	Vector<Point *> open_list;
+	SortArray<Point *, SortPoints> sorter;
+
+	begin_point->g_score = 0;
+	begin_point->f_score = _estimate_cost(begin_point->id, end_point->id);
+	open_list.push_back(begin_point);
+
+	while (!open_list.is_empty()) {
+		Point *p = open_list[0]; // The currently processed point
+
+		if (p == end_point) {
+			found_route = true;
 			break;
 		}
-		//check open list
 
-		SelfList<Point> *least_cost_point=NULL;
-		real_t least_cost=1e30;
+		sorter.pop_heap(0, open_list.size(), open_list.ptrw()); // Remove the current point from the open list
+		open_list.remove(open_list.size() - 1);
+		p->closed_pass = pass; // Mark the point as closed
 
-		//this could be faster (cache previous results)
-		for (SelfList<Point> *E=open_list.first();E;E=E->next()) {
+		for (OAHashMap<int, Point *>::Iterator it = p->neighbours.iter(); it.valid; it = p->neighbours.next_iter(it)) {
+			Point *e = *(it.value); // The neighbour point
 
-			Point *p=E->self();
-
-			real_t cost=p->distance;
-			cost+=p->pos.distance_to(end_point->pos);
-			cost*=p->weight_scale;
-
-			if (cost<least_cost) {
-
-				least_cost_point=E;
-				least_cost=cost;
+			if (!e->enabled || e->closed_pass == pass) {
+				continue;
 			}
-		}
 
+			real_t tentative_g_score = p->g_score + _compute_cost(p->id, e->id) * e->weight_scale;
 
-		Point *p=least_cost_point->self();
-		//open the neighbours for search
-		int es = p->neighbours.size();
+			bool new_point = false;
 
-		for(int i=0;i<es;i++) {
+			if (e->open_pass != pass) { // The point wasn't inside the open list.
+				e->open_pass = pass;
+				open_list.push_back(e);
+				new_point = true;
+			} else if (tentative_g_score >= e->g_score) { // The new path is worse than the previous.
+				continue;
+			}
 
+			e->prev_point = p;
+			e->g_score = tentative_g_score;
+			e->f_score = e->g_score + _estimate_cost(e->id, end_point->id);
 
-			Point* e=p->neighbours[i];
-
-
-			real_t distance = p->pos.distance_to(e->pos) + p->distance;
-			distance*=e->weight_scale;
-
-
-
-			if (e->last_pass==pass) {
-				//oh this was visited already, can we win the cost?
-
-				if (e->distance>distance) {
-
-					e->prev_point=p;
-					e->distance=distance;
-				}
+			if (new_point) { // The position of the new points is already known.
+				sorter.push_heap(0, open_list.size() - 1, 0, e, open_list.ptrw());
 			} else {
-				//add to open neighbours
-
-				e->prev_point=p;
-				e->distance=distance;
-				e->last_pass=pass; //mark as used
-				open_list.add(&e->list);
-
-				if (e==end_point) {
-					//oh my reached end! stop algorithm
-					found_route=true;
-					break;
-
-				}
-
+				sorter.push_heap(0, open_list.find(e), 0, e, open_list.ptrw());
 			}
 		}
-
-		if (found_route)
-			break;
-
-		open_list.remove(least_cost_point);
-	}
-
-	//clear the openf list
-	while(open_list.first()) {
-		open_list.remove( open_list.first() );
 	}
 
 	return found_route;
-
 }
 
-PoolVector<Vector3> AStar::get_point_path(int p_from_id, int p_to_id) {
+real_t AStar::_estimate_cost(int p_from_id, int p_to_id) {
+	if (get_script_instance() && get_script_instance()->has_method(SceneStringNames::get_singleton()->_estimate_cost)) {
+		return get_script_instance()->call(SceneStringNames::get_singleton()->_estimate_cost, p_from_id, p_to_id);
+	}
 
-	ERR_FAIL_COND_V(!points.has(p_from_id),PoolVector<Vector3>());
-	ERR_FAIL_COND_V(!points.has(p_to_id),PoolVector<Vector3>());
+	Point *from_point;
+	bool from_exists = points.lookup(p_from_id, from_point);
+	ERR_FAIL_COND_V(!from_exists, 0);
 
+	Point *to_point;
+	bool to_exists = points.lookup(p_to_id, to_point);
+	ERR_FAIL_COND_V(!to_exists, 0);
 
-	pass++;
+	return from_point->pos.distance_to(to_point->pos);
+}
 
-	Point* a = points[p_from_id];
-	Point* b = points[p_to_id];
+real_t AStar::_compute_cost(int p_from_id, int p_to_id) {
+	if (get_script_instance() && get_script_instance()->has_method(SceneStringNames::get_singleton()->_compute_cost)) {
+		return get_script_instance()->call(SceneStringNames::get_singleton()->_compute_cost, p_from_id, p_to_id);
+	}
 
-	if (a==b) {
-		PoolVector<Vector3> ret;
+	Point *from_point;
+	bool from_exists = points.lookup(p_from_id, from_point);
+	ERR_FAIL_COND_V(!from_exists, 0);
+
+	Point *to_point;
+	bool to_exists = points.lookup(p_to_id, to_point);
+	ERR_FAIL_COND_V(!to_exists, 0);
+
+	return from_point->pos.distance_to(to_point->pos);
+}
+
+Vector<Vector3> AStar::get_point_path(int p_from_id, int p_to_id) {
+	Point *a;
+	bool from_exists = points.lookup(p_from_id, a);
+	ERR_FAIL_COND_V(!from_exists, Vector<Vector3>());
+
+	Point *b;
+	bool to_exists = points.lookup(p_to_id, b);
+	ERR_FAIL_COND_V(!to_exists, Vector<Vector3>());
+
+	if (a == b) {
+		Vector<Vector3> ret;
 		ret.push_back(a->pos);
 		return ret;
 	}
 
+	Point *begin_point = a;
+	Point *end_point = b;
 
-	Point *begin_point=a;
-	Point *end_point=b;
-
-	bool found_route=_solve(begin_point,end_point);
-
-	if (!found_route)
-		return PoolVector<Vector3>();
-
-	//midpoints
-	Point *p=end_point;
-	int pc=1; //begin point
-	while(p!=begin_point) {
-		pc++;
-		p=p->prev_point;
+	bool found_route = _solve(begin_point, end_point);
+	if (!found_route) {
+		return Vector<Vector3>();
 	}
 
-	PoolVector<Vector3> path;
+	Point *p = end_point;
+	int pc = 1; // Begin point
+	while (p != begin_point) {
+		pc++;
+		p = p->prev_point;
+	}
+
+	Vector<Vector3> path;
 	path.resize(pc);
 
 	{
-		PoolVector<Vector3>::Write w = path.write();
+		Vector3 *w = path.ptrw();
 
-		Point *p=end_point;
-		int idx=pc-1;
-		while(p!=begin_point) {
-			w[idx--]=p->pos;
-			p=p->prev_point;
+		Point *p2 = end_point;
+		int idx = pc - 1;
+		while (p2 != begin_point) {
+			w[idx--] = p2->pos;
+			p2 = p2->prev_point;
 		}
 
-		w[0]=p->pos; //assign first
-
+		w[0] = p2->pos; // Assign first
 	}
 
 	return path;
-
 }
 
+Vector<int> AStar::get_id_path(int p_from_id, int p_to_id) {
+	Point *a;
+	bool from_exists = points.lookup(p_from_id, a);
+	ERR_FAIL_COND_V(!from_exists, Vector<int>());
 
-PoolVector<int> AStar::get_id_path(int p_from_id, int p_to_id) {
+	Point *b;
+	bool to_exists = points.lookup(p_to_id, b);
+	ERR_FAIL_COND_V(!to_exists, Vector<int>());
 
-	ERR_FAIL_COND_V(!points.has(p_from_id),PoolVector<int>());
-	ERR_FAIL_COND_V(!points.has(p_to_id),PoolVector<int>());
-
-
-	pass++;
-
-	Point* a = points[p_from_id];
-	Point* b = points[p_to_id];
-
-	if (a==b) {
-		PoolVector<int> ret;
+	if (a == b) {
+		Vector<int> ret;
 		ret.push_back(a->id);
 		return ret;
 	}
 
+	Point *begin_point = a;
+	Point *end_point = b;
 
-	Point *begin_point=a;
-	Point *end_point=b;
-
-	bool found_route=_solve(begin_point,end_point);
-
-	if (!found_route)
-		return PoolVector<int>();
-
-	//midpoints
-	Point *p=end_point;
-	int pc=1; //begin point
-	while(p!=begin_point) {
-		pc++;
-		p=p->prev_point;
+	bool found_route = _solve(begin_point, end_point);
+	if (!found_route) {
+		return Vector<int>();
 	}
 
-	PoolVector<int> path;
+	Point *p = end_point;
+	int pc = 1; // Begin point
+	while (p != begin_point) {
+		pc++;
+		p = p->prev_point;
+	}
+
+	Vector<int> path;
 	path.resize(pc);
 
 	{
-		PoolVector<int>::Write w = path.write();
+		int *w = path.ptrw();
 
-		p=end_point;
-		int idx=pc-1;
-		while(p!=begin_point) {
-			w[idx--]=p->id;
-			p=p->prev_point;
+		p = end_point;
+		int idx = pc - 1;
+		while (p != begin_point) {
+			w[idx--] = p->id;
+			p = p->prev_point;
 		}
 
-		w[0]=p->id; //assign first
-
+		w[0] = p->id; // Assign first
 	}
 
 	return path;
 }
 
+void AStar::set_point_disabled(int p_id, bool p_disabled) {
+	Point *p;
+	bool p_exists = points.lookup(p_id, p);
+	ERR_FAIL_COND(!p_exists);
+
+	p->enabled = !p_disabled;
+}
+
+bool AStar::is_point_disabled(int p_id) const {
+	Point *p;
+	bool p_exists = points.lookup(p_id, p);
+	ERR_FAIL_COND_V(!p_exists, false);
+
+	return !p->enabled;
+}
+
 void AStar::_bind_methods() {
+	ClassDB::bind_method(D_METHOD("get_available_point_id"), &AStar::get_available_point_id);
+	ClassDB::bind_method(D_METHOD("add_point", "id", "position", "weight_scale"), &AStar::add_point, DEFVAL(1.0));
+	ClassDB::bind_method(D_METHOD("get_point_position", "id"), &AStar::get_point_position);
+	ClassDB::bind_method(D_METHOD("set_point_position", "id", "position"), &AStar::set_point_position);
+	ClassDB::bind_method(D_METHOD("get_point_weight_scale", "id"), &AStar::get_point_weight_scale);
+	ClassDB::bind_method(D_METHOD("set_point_weight_scale", "id", "weight_scale"), &AStar::set_point_weight_scale);
+	ClassDB::bind_method(D_METHOD("remove_point", "id"), &AStar::remove_point);
+	ClassDB::bind_method(D_METHOD("has_point", "id"), &AStar::has_point);
+	ClassDB::bind_method(D_METHOD("get_point_connections", "id"), &AStar::get_point_connections);
+	ClassDB::bind_method(D_METHOD("get_points"), &AStar::get_points);
 
-	ClassDB::bind_method(_MD("get_available_point_id"),&AStar::get_available_point_id);
-	ClassDB::bind_method(_MD("add_point","id","pos","weight_scale"),&AStar::add_point,DEFVAL(1.0));
-	ClassDB::bind_method(_MD("get_point_pos","id"),&AStar::get_point_pos);
-	ClassDB::bind_method(_MD("get_point_weight_scale","id"),&AStar::get_point_weight_scale);
-	ClassDB::bind_method(_MD("remove_point","id"),&AStar::remove_point);
+	ClassDB::bind_method(D_METHOD("set_point_disabled", "id", "disabled"), &AStar::set_point_disabled, DEFVAL(true));
+	ClassDB::bind_method(D_METHOD("is_point_disabled", "id"), &AStar::is_point_disabled);
 
-	ClassDB::bind_method(_MD("connect_points","id","to_id"),&AStar::connect_points);
-	ClassDB::bind_method(_MD("disconnect_points","id","to_id"),&AStar::disconnect_points);
-	ClassDB::bind_method(_MD("are_points_connected","id","to_id"),&AStar::are_points_connected);
+	ClassDB::bind_method(D_METHOD("connect_points", "id", "to_id", "bidirectional"), &AStar::connect_points, DEFVAL(true));
+	ClassDB::bind_method(D_METHOD("disconnect_points", "id", "to_id", "bidirectional"), &AStar::disconnect_points, DEFVAL(true));
+	ClassDB::bind_method(D_METHOD("are_points_connected", "id", "to_id", "bidirectional"), &AStar::are_points_connected, DEFVAL(true));
 
-	ClassDB::bind_method(_MD("clear"),&AStar::clear);
+	ClassDB::bind_method(D_METHOD("get_point_count"), &AStar::get_point_count);
+	ClassDB::bind_method(D_METHOD("get_point_capacity"), &AStar::get_point_capacity);
+	ClassDB::bind_method(D_METHOD("reserve_space", "num_nodes"), &AStar::reserve_space);
+	ClassDB::bind_method(D_METHOD("clear"), &AStar::clear);
 
-	ClassDB::bind_method(_MD("get_closest_point","to_pos"),&AStar::get_closest_point);
-	ClassDB::bind_method(_MD("get_closest_pos_in_segment","to_pos"),&AStar::get_closest_pos_in_segment);
+	ClassDB::bind_method(D_METHOD("get_closest_point", "to_position", "include_disabled"), &AStar::get_closest_point, DEFVAL(false));
+	ClassDB::bind_method(D_METHOD("get_closest_position_in_segment", "to_position"), &AStar::get_closest_position_in_segment);
 
-	ClassDB::bind_method(_MD("get_point_path","from_id","to_id"),&AStar::get_point_path);
-	ClassDB::bind_method(_MD("get_id_path","from_id","to_id"),&AStar::get_id_path);
+	ClassDB::bind_method(D_METHOD("get_point_path", "from_id", "to_id"), &AStar::get_point_path);
+	ClassDB::bind_method(D_METHOD("get_id_path", "from_id", "to_id"), &AStar::get_id_path);
 
+	BIND_VMETHOD(MethodInfo(Variant::FLOAT, "_estimate_cost", PropertyInfo(Variant::INT, "from_id"), PropertyInfo(Variant::INT, "to_id")));
+	BIND_VMETHOD(MethodInfo(Variant::FLOAT, "_compute_cost", PropertyInfo(Variant::INT, "from_id"), PropertyInfo(Variant::INT, "to_id")));
 }
-
-
-AStar::AStar() {
-
-	pass=1;
-}
-
 
 AStar::~AStar() {
+	clear();
+}
 
-	pass=1;
+/////////////////////////////////////////////////////////////
+
+int AStar2D::get_available_point_id() const {
+	return astar.get_available_point_id();
+}
+
+void AStar2D::add_point(int p_id, const Vector2 &p_pos, real_t p_weight_scale) {
+	astar.add_point(p_id, Vector3(p_pos.x, p_pos.y, 0), p_weight_scale);
+}
+
+Vector2 AStar2D::get_point_position(int p_id) const {
+	Vector3 p = astar.get_point_position(p_id);
+	return Vector2(p.x, p.y);
+}
+
+void AStar2D::set_point_position(int p_id, const Vector2 &p_pos) {
+	astar.set_point_position(p_id, Vector3(p_pos.x, p_pos.y, 0));
+}
+
+real_t AStar2D::get_point_weight_scale(int p_id) const {
+	return astar.get_point_weight_scale(p_id);
+}
+
+void AStar2D::set_point_weight_scale(int p_id, real_t p_weight_scale) {
+	astar.set_point_weight_scale(p_id, p_weight_scale);
+}
+
+void AStar2D::remove_point(int p_id) {
+	astar.remove_point(p_id);
+}
+
+bool AStar2D::has_point(int p_id) const {
+	return astar.has_point(p_id);
+}
+
+Vector<int> AStar2D::get_point_connections(int p_id) {
+	return astar.get_point_connections(p_id);
+}
+
+Array AStar2D::get_points() {
+	return astar.get_points();
+}
+
+void AStar2D::set_point_disabled(int p_id, bool p_disabled) {
+	astar.set_point_disabled(p_id, p_disabled);
+}
+
+bool AStar2D::is_point_disabled(int p_id) const {
+	return astar.is_point_disabled(p_id);
+}
+
+void AStar2D::connect_points(int p_id, int p_with_id, bool p_bidirectional) {
+	astar.connect_points(p_id, p_with_id, p_bidirectional);
+}
+
+void AStar2D::disconnect_points(int p_id, int p_with_id) {
+	astar.disconnect_points(p_id, p_with_id);
+}
+
+bool AStar2D::are_points_connected(int p_id, int p_with_id) const {
+	return astar.are_points_connected(p_id, p_with_id);
+}
+
+int AStar2D::get_point_count() const {
+	return astar.get_point_count();
+}
+
+int AStar2D::get_point_capacity() const {
+	return astar.get_point_capacity();
+}
+
+void AStar2D::clear() {
+	astar.clear();
+}
+
+void AStar2D::reserve_space(int p_num_nodes) {
+	astar.reserve_space(p_num_nodes);
+}
+
+int AStar2D::get_closest_point(const Vector2 &p_point, bool p_include_disabled) const {
+	return astar.get_closest_point(Vector3(p_point.x, p_point.y, 0), p_include_disabled);
+}
+
+Vector2 AStar2D::get_closest_position_in_segment(const Vector2 &p_point) const {
+	Vector3 p = astar.get_closest_position_in_segment(Vector3(p_point.x, p_point.y, 0));
+	return Vector2(p.x, p.y);
+}
+
+real_t AStar2D::_estimate_cost(int p_from_id, int p_to_id) {
+	if (get_script_instance() && get_script_instance()->has_method(SceneStringNames::get_singleton()->_estimate_cost)) {
+		return get_script_instance()->call(SceneStringNames::get_singleton()->_estimate_cost, p_from_id, p_to_id);
+	}
+
+	AStar::Point *from_point;
+	bool from_exists = astar.points.lookup(p_from_id, from_point);
+	ERR_FAIL_COND_V(!from_exists, 0);
+
+	AStar::Point *to_point;
+	bool to_exists = astar.points.lookup(p_to_id, to_point);
+	ERR_FAIL_COND_V(!to_exists, 0);
+
+	return from_point->pos.distance_to(to_point->pos);
+}
+
+real_t AStar2D::_compute_cost(int p_from_id, int p_to_id) {
+	if (get_script_instance() && get_script_instance()->has_method(SceneStringNames::get_singleton()->_compute_cost)) {
+		return get_script_instance()->call(SceneStringNames::get_singleton()->_compute_cost, p_from_id, p_to_id);
+	}
+
+	AStar::Point *from_point;
+	bool from_exists = astar.points.lookup(p_from_id, from_point);
+	ERR_FAIL_COND_V(!from_exists, 0);
+
+	AStar::Point *to_point;
+	bool to_exists = astar.points.lookup(p_to_id, to_point);
+	ERR_FAIL_COND_V(!to_exists, 0);
+
+	return from_point->pos.distance_to(to_point->pos);
+}
+
+Vector<Vector2> AStar2D::get_point_path(int p_from_id, int p_to_id) {
+	AStar::Point *a;
+	bool from_exists = astar.points.lookup(p_from_id, a);
+	ERR_FAIL_COND_V(!from_exists, Vector<Vector2>());
+
+	AStar::Point *b;
+	bool to_exists = astar.points.lookup(p_to_id, b);
+	ERR_FAIL_COND_V(!to_exists, Vector<Vector2>());
+
+	if (a == b) {
+		Vector<Vector2> ret;
+		ret.push_back(Vector2(a->pos.x, a->pos.y));
+		return ret;
+	}
+
+	AStar::Point *begin_point = a;
+	AStar::Point *end_point = b;
+
+	bool found_route = _solve(begin_point, end_point);
+	if (!found_route) {
+		return Vector<Vector2>();
+	}
+
+	AStar::Point *p = end_point;
+	int pc = 1; // Begin point
+	while (p != begin_point) {
+		pc++;
+		p = p->prev_point;
+	}
+
+	Vector<Vector2> path;
+	path.resize(pc);
+
+	{
+		Vector2 *w = path.ptrw();
+
+		AStar::Point *p2 = end_point;
+		int idx = pc - 1;
+		while (p2 != begin_point) {
+			w[idx--] = Vector2(p2->pos.x, p2->pos.y);
+			p2 = p2->prev_point;
+		}
+
+		w[0] = Vector2(p2->pos.x, p2->pos.y); // Assign first
+	}
+
+	return path;
+}
+
+Vector<int> AStar2D::get_id_path(int p_from_id, int p_to_id) {
+	AStar::Point *a;
+	bool from_exists = astar.points.lookup(p_from_id, a);
+	ERR_FAIL_COND_V(!from_exists, Vector<int>());
+
+	AStar::Point *b;
+	bool to_exists = astar.points.lookup(p_to_id, b);
+	ERR_FAIL_COND_V(!to_exists, Vector<int>());
+
+	if (a == b) {
+		Vector<int> ret;
+		ret.push_back(a->id);
+		return ret;
+	}
+
+	AStar::Point *begin_point = a;
+	AStar::Point *end_point = b;
+
+	bool found_route = _solve(begin_point, end_point);
+	if (!found_route) {
+		return Vector<int>();
+	}
+
+	AStar::Point *p = end_point;
+	int pc = 1; // Begin point
+	while (p != begin_point) {
+		pc++;
+		p = p->prev_point;
+	}
+
+	Vector<int> path;
+	path.resize(pc);
+
+	{
+		int *w = path.ptrw();
+
+		p = end_point;
+		int idx = pc - 1;
+		while (p != begin_point) {
+			w[idx--] = p->id;
+			p = p->prev_point;
+		}
+
+		w[0] = p->id; // Assign first
+	}
+
+	return path;
+}
+
+bool AStar2D::_solve(AStar::Point *begin_point, AStar::Point *end_point) {
+	astar.pass++;
+
+	if (!end_point->enabled) {
+		return false;
+	}
+
+	bool found_route = false;
+
+	Vector<AStar::Point *> open_list;
+	SortArray<AStar::Point *, AStar::SortPoints> sorter;
+
+	begin_point->g_score = 0;
+	begin_point->f_score = _estimate_cost(begin_point->id, end_point->id);
+	open_list.push_back(begin_point);
+
+	while (!open_list.is_empty()) {
+		AStar::Point *p = open_list[0]; // The currently processed point
+
+		if (p == end_point) {
+			found_route = true;
+			break;
+		}
+
+		sorter.pop_heap(0, open_list.size(), open_list.ptrw()); // Remove the current point from the open list
+		open_list.remove(open_list.size() - 1);
+		p->closed_pass = astar.pass; // Mark the point as closed
+
+		for (OAHashMap<int, AStar::Point *>::Iterator it = p->neighbours.iter(); it.valid; it = p->neighbours.next_iter(it)) {
+			AStar::Point *e = *(it.value); // The neighbour point
+
+			if (!e->enabled || e->closed_pass == astar.pass) {
+				continue;
+			}
+
+			real_t tentative_g_score = p->g_score + _compute_cost(p->id, e->id) * e->weight_scale;
+
+			bool new_point = false;
+
+			if (e->open_pass != astar.pass) { // The point wasn't inside the open list.
+				e->open_pass = astar.pass;
+				open_list.push_back(e);
+				new_point = true;
+			} else if (tentative_g_score >= e->g_score) { // The new path is worse than the previous.
+				continue;
+			}
+
+			e->prev_point = p;
+			e->g_score = tentative_g_score;
+			e->f_score = e->g_score + _estimate_cost(e->id, end_point->id);
+
+			if (new_point) { // The position of the new points is already known.
+				sorter.push_heap(0, open_list.size() - 1, 0, e, open_list.ptrw());
+			} else {
+				sorter.push_heap(0, open_list.find(e), 0, e, open_list.ptrw());
+			}
+		}
+	}
+
+	return found_route;
+}
+
+void AStar2D::_bind_methods() {
+	ClassDB::bind_method(D_METHOD("get_available_point_id"), &AStar2D::get_available_point_id);
+	ClassDB::bind_method(D_METHOD("add_point", "id", "position", "weight_scale"), &AStar2D::add_point, DEFVAL(1.0));
+	ClassDB::bind_method(D_METHOD("get_point_position", "id"), &AStar2D::get_point_position);
+	ClassDB::bind_method(D_METHOD("set_point_position", "id", "position"), &AStar2D::set_point_position);
+	ClassDB::bind_method(D_METHOD("get_point_weight_scale", "id"), &AStar2D::get_point_weight_scale);
+	ClassDB::bind_method(D_METHOD("set_point_weight_scale", "id", "weight_scale"), &AStar2D::set_point_weight_scale);
+	ClassDB::bind_method(D_METHOD("remove_point", "id"), &AStar2D::remove_point);
+	ClassDB::bind_method(D_METHOD("has_point", "id"), &AStar2D::has_point);
+	ClassDB::bind_method(D_METHOD("get_point_connections", "id"), &AStar2D::get_point_connections);
+	ClassDB::bind_method(D_METHOD("get_points"), &AStar2D::get_points);
+
+	ClassDB::bind_method(D_METHOD("set_point_disabled", "id", "disabled"), &AStar2D::set_point_disabled, DEFVAL(true));
+	ClassDB::bind_method(D_METHOD("is_point_disabled", "id"), &AStar2D::is_point_disabled);
+
+	ClassDB::bind_method(D_METHOD("connect_points", "id", "to_id", "bidirectional"), &AStar2D::connect_points, DEFVAL(true));
+	ClassDB::bind_method(D_METHOD("disconnect_points", "id", "to_id"), &AStar2D::disconnect_points);
+	ClassDB::bind_method(D_METHOD("are_points_connected", "id", "to_id"), &AStar2D::are_points_connected);
+
+	ClassDB::bind_method(D_METHOD("get_point_count"), &AStar2D::get_point_count);
+	ClassDB::bind_method(D_METHOD("get_point_capacity"), &AStar2D::get_point_capacity);
+	ClassDB::bind_method(D_METHOD("reserve_space", "num_nodes"), &AStar2D::reserve_space);
+	ClassDB::bind_method(D_METHOD("clear"), &AStar2D::clear);
+
+	ClassDB::bind_method(D_METHOD("get_closest_point", "to_position", "include_disabled"), &AStar2D::get_closest_point, DEFVAL(false));
+	ClassDB::bind_method(D_METHOD("get_closest_position_in_segment", "to_position"), &AStar2D::get_closest_position_in_segment);
+
+	ClassDB::bind_method(D_METHOD("get_point_path", "from_id", "to_id"), &AStar2D::get_point_path);
+	ClassDB::bind_method(D_METHOD("get_id_path", "from_id", "to_id"), &AStar2D::get_id_path);
+
+	BIND_VMETHOD(MethodInfo(Variant::FLOAT, "_estimate_cost", PropertyInfo(Variant::INT, "from_id"), PropertyInfo(Variant::INT, "to_id")));
+	BIND_VMETHOD(MethodInfo(Variant::FLOAT, "_compute_cost", PropertyInfo(Variant::INT, "from_id"), PropertyInfo(Variant::INT, "to_id")));
 }

@@ -3,9 +3,10 @@
 /*************************************************************************/
 /*                       This file is part of:                           */
 /*                           GODOT ENGINE                                */
-/*                    http://www.godotengine.org                         */
+/*                      https://godotengine.org                          */
 /*************************************************************************/
-/* Copyright (c) 2007-2017 Juan Linietsky, Ariel Manzur.                 */
+/* Copyright (c) 2007-2021 Juan Linietsky, Ariel Manzur.                 */
+/* Copyright (c) 2014-2021 Godot Engine contributors (cf. AUTHORS.md).   */
 /*                                                                       */
 /* Permission is hereby granted, free of charge, to any person obtaining */
 /* a copy of this software and associated documentation files (the       */
@@ -27,51 +28,71 @@
 /* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                */
 /*************************************************************************/
 
+// Must include Winsock before windows.h (included by os_windows.h)
+#include "drivers/unix/net_socket_posix.h"
+
 #include "os_windows.h"
 
-#include "drivers/gles3/rasterizer_gles3.h"
-#include "drivers/windows/thread_windows.h"
-#include "drivers/windows/semaphore_windows.h"
-#include "drivers/windows/mutex_windows.h"
-#include "drivers/windows/rw_lock_windows.h"
-#include "drivers/windows/file_access_windows.h"
+#include "core/debugger/engine_debugger.h"
+#include "core/debugger/script_debugger.h"
+#include "core/io/marshalls.h"
+#include "core/version_generated.gen.h"
 #include "drivers/windows/dir_access_windows.h"
-#include "servers/visual/visual_server_raster.h"
-#include "servers/audio_server.h"
-//#include "servers/visual/visual_server_wrap_mt.h"
-#include "main/main.h"
-#include "tcp_server_winsock.h"
-#include "packet_peer_udp_winsock.h"
-#include "stream_peer_winsock.h"
+#include "drivers/windows/file_access_windows.h"
+#include "drivers/windows/rw_lock_windows.h"
+#include "drivers/windows/thread_windows.h"
+#include "joypad_windows.h"
 #include "lang_table.h"
-#include "globals.h"
-#include "io/marshalls.h"
-#include "joypad.h"
+#include "main/main.h"
+#include "platform/windows/display_server_windows.h"
+#include "servers/audio_server.h"
+#include "servers/rendering/rendering_server_default.h"
+#include "servers/rendering/rendering_server_wrap_mt.h"
+#include "windows_terminal_logger.h"
 
-#include <shlobj.h>
-#include <regstr.h>
+#include <avrt.h>
+#include <direct.h>
+#include <knownfolders.h>
 #include <process.h>
+#include <regstr.h>
+#include <shlobj.h>
 
 static const WORD MAX_CONSOLE_LINES = 1500;
 
 extern "C" {
-#ifdef _MSC_VER
-	_declspec(dllexport) DWORD NvOptimusEnablement = 0x00000001;
-#else
-	__attribute__((visibility("default"))) DWORD NvOptimusEnablement = 0x00000001;
-#endif
+__declspec(dllexport) DWORD NvOptimusEnablement = 1;
+__declspec(dllexport) int AmdPowerXpressRequestHighPerformance = 1;
 }
 
-#ifndef WM_MOUSEHWHEEL
-#define WM_MOUSEHWHEEL 0x020e
+// Workaround mingw-w64 < 4.0 bug
+#ifndef WM_TOUCH
+#define WM_TOUCH 576
 #endif
 
-//#define STDOUT_FILE
+#ifndef WM_POINTERUPDATE
+#define WM_POINTERUPDATE 0x0245
+#endif
 
-extern HINSTANCE godot_hinstance;
+#if defined(__GNUC__)
+// Workaround GCC warning from -Wcast-function-type.
+#define GetProcAddress (void *)GetProcAddress
+#endif
+
+#ifdef DEBUG_ENABLED
+static String format_error_message(DWORD id) {
+	LPWSTR messageBuffer = nullptr;
+	size_t size = FormatMessageW(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
+			nullptr, id, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT), (LPWSTR)&messageBuffer, 0, nullptr);
+
+	String msg = "Error " + itos(id) + ": " + String::utf16((const char16_t *)messageBuffer, size);
+
+	LocalFree(messageBuffer);
+
+	return msg;
+}
+#endif // DEBUG_ENABLED
 
 void RedirectIOToConsole() {
-
 	int hConHandle;
 
 	intptr_t lStdHandle;
@@ -86,15 +107,11 @@ void RedirectIOToConsole() {
 
 	// set the screen buffer to be big enough to let us scroll text
 
-	GetConsoleScreenBufferInfo(GetStdHandle(STD_OUTPUT_HANDLE),
-
-	&coninfo);
+	GetConsoleScreenBufferInfo(GetStdHandle(STD_OUTPUT_HANDLE), &coninfo);
 
 	coninfo.dwSize.Y = MAX_CONSOLE_LINES;
 
-	SetConsoleScreenBufferSize(GetStdHandle(STD_OUTPUT_HANDLE),
-
-	coninfo.dwSize);
+	SetConsoleScreenBufferSize(GetStdHandle(STD_OUTPUT_HANDLE), coninfo.dwSize);
 
 	// redirect unbuffered STDOUT to the console
 
@@ -102,11 +119,11 @@ void RedirectIOToConsole() {
 
 	hConHandle = _open_osfhandle(lStdHandle, _O_TEXT);
 
-	fp = _fdopen( hConHandle, "w" );
+	fp = _fdopen(hConHandle, "w");
 
 	*stdout = *fp;
 
-	setvbuf( stdout, NULL, _IONBF, 0 );
+	setvbuf(stdout, nullptr, _IONBF, 0);
 
 	// redirect unbuffered STDIN to the console
 
@@ -114,11 +131,11 @@ void RedirectIOToConsole() {
 
 	hConHandle = _open_osfhandle(lStdHandle, _O_TEXT);
 
-	fp = _fdopen( hConHandle, "r" );
+	fp = _fdopen(hConHandle, "r");
 
 	*stdin = *fp;
 
-	setvbuf( stdin, NULL, _IONBF, 0 );
+	setvbuf(stdin, nullptr, _IONBF, 0);
 
 	// redirect unbuffered STDERR to the console
 
@@ -126,1684 +143,160 @@ void RedirectIOToConsole() {
 
 	hConHandle = _open_osfhandle(lStdHandle, _O_TEXT);
 
-	fp = _fdopen( hConHandle, "w" );
+	fp = _fdopen(hConHandle, "w");
 
 	*stderr = *fp;
 
-	setvbuf( stderr, NULL, _IONBF, 0 );
+	setvbuf(stderr, nullptr, _IONBF, 0);
 
 	// make cout, wcout, cin, wcin, wcerr, cerr, wclog and clog
 
 	// point to console as well
 }
 
-int OS_Windows::get_video_driver_count() const {
+BOOL WINAPI HandlerRoutine(_In_ DWORD dwCtrlType) {
+	if (!EngineDebugger::is_active())
+		return FALSE;
 
-	return 1;
-}
-const char * OS_Windows::get_video_driver_name(int p_driver) const {
-
-	return "GLES2";
-}
-
-OS::VideoMode OS_Windows::get_default_video_mode() const {
-
-	return VideoMode(1024,600,false);
-}
-
-int OS_Windows::get_audio_driver_count() const {
-
-	return AudioDriverManager::get_driver_count();
-}
-const char * OS_Windows::get_audio_driver_name(int p_driver) const {
-
-	AudioDriver* driver = AudioDriverManager::get_driver(p_driver);
-	ERR_FAIL_COND_V( !driver, "" );
-	return AudioDriverManager::get_driver(p_driver)->get_name();
+	switch (dwCtrlType) {
+		case CTRL_C_EVENT:
+			EngineDebugger::get_script_debugger()->set_depth(-1);
+			EngineDebugger::get_script_debugger()->set_lines_left(1);
+			return TRUE;
+		default:
+			return FALSE;
+	}
 }
 
+void OS_Windows::initialize_debugging() {
+	SetConsoleCtrlHandler(HandlerRoutine, TRUE);
+}
 
-void OS_Windows::initialize_core() {
-
-
-	last_button_state=0;
+void OS_Windows::initialize() {
+	crash_handler.initialize();
 
 	//RedirectIOToConsole();
-	maximized=false;
-	minimized=false;
-	borderless=false;
 
 	ThreadWindows::make_default();
-	SemaphoreWindows::make_default();
-	MutexWindows::make_default();
 	RWLockWindows::make_default();
 
 	FileAccess::make_default<FileAccessWindows>(FileAccess::ACCESS_RESOURCES);
 	FileAccess::make_default<FileAccessWindows>(FileAccess::ACCESS_USERDATA);
 	FileAccess::make_default<FileAccessWindows>(FileAccess::ACCESS_FILESYSTEM);
-	//FileAccessBufferedFA<FileAccessWindows>::make_default();
 	DirAccess::make_default<DirAccessWindows>(DirAccess::ACCESS_RESOURCES);
 	DirAccess::make_default<DirAccessWindows>(DirAccess::ACCESS_USERDATA);
 	DirAccess::make_default<DirAccessWindows>(DirAccess::ACCESS_FILESYSTEM);
 
-	TCPServerWinsock::make_default();
-	StreamPeerWinsock::make_default();
-	PacketPeerUDPWinsock::make_default();
+	NetSocketPosix::make_default();
 
-
-	   // We need to know how often the clock is updated
-	if( !QueryPerformanceFrequency((LARGE_INTEGER *)&ticks_per_second) )
+	// We need to know how often the clock is updated
+	if (!QueryPerformanceFrequency((LARGE_INTEGER *)&ticks_per_second))
 		ticks_per_second = 1000;
 	// If timeAtGameStart is 0 then we get the time since
 	// the start of the computer when we call GetGameTime()
 	ticks_start = 0;
 	ticks_start = get_ticks_usec();
 
+	// set minimum resolution for periodic timers, otherwise Sleep(n) may wait at least as
+	//  long as the windows scheduler resolution (~16-30ms) even for calls like Sleep(1)
+	timeBeginPeriod(1);
+
 	process_map = memnew((Map<ProcessID, ProcessInfo>));
 
+	// Add current Godot PID to the list of known PIDs
+	ProcessInfo current_pi = {};
+	PROCESS_INFORMATION current_pi_pi = {};
+	current_pi.pi = current_pi_pi;
+	current_pi.pi.hProcess = GetCurrentProcess();
+	process_map->insert(GetCurrentProcessId(), current_pi);
+
 	IP_Unix::make_default();
-
-	cursor_shape=CURSOR_ARROW;
-
-
+	main_loop = nullptr;
 }
-
-bool OS_Windows::can_draw() const {
-
-	return !minimized;
-};
-
-#define MI_WP_SIGNATURE 0xFF515700
-#define SIGNATURE_MASK 0xFFFFFF00
-#define IsPenEvent(dw) (((dw) & SIGNATURE_MASK) == MI_WP_SIGNATURE)
-
-
-void OS_Windows::_touch_event(bool p_pressed, int p_x, int p_y, int idx) {
-
-	InputEvent event;
-	event.type = InputEvent::SCREEN_TOUCH;
-	event.ID=++last_id;
-	event.screen_touch.index = idx;
-
-	event.screen_touch.pressed = p_pressed;
-
-	event.screen_touch.x=p_x;
-	event.screen_touch.y=p_y;
-
-	if (main_loop) {
-		input->parse_input_event(event);
-	}
-};
-
-void OS_Windows::_drag_event(int p_x, int p_y, int idx) {
-
-	InputEvent event;
-	event.type = InputEvent::SCREEN_DRAG;
-	event.ID=++last_id;
-	event.screen_drag.index = idx;
-
-	event.screen_drag.x=p_x;
-	event.screen_drag.y=p_y;
-
-	if (main_loop)
-		input->parse_input_event(event);
-};
-
-LRESULT OS_Windows::WndProc(HWND hWnd,UINT uMsg, WPARAM	wParam,	LPARAM	lParam) {
-
-
-		switch (uMsg)									// Check For Windows Messages
-	{
-		case WM_SETFOCUS:
-		{
-			window_has_focus = true;
-			// Re-capture cursor if we're in one of the capture modes
-			if (mouse_mode==MOUSE_MODE_CAPTURED || mouse_mode==MOUSE_MODE_CONFINED) {
-				SetCapture(hWnd);
-			}
-			break;
-		}
-		case WM_KILLFOCUS:
-		{
-			window_has_focus = false;
-
-			// Release capture if we're in one of the capture modes
-			if (mouse_mode==MOUSE_MODE_CAPTURED || mouse_mode==MOUSE_MODE_CONFINED) {
-				ReleaseCapture();
-			}
-			break;
-		}
-		case WM_ACTIVATE:							// Watch For Window Activate Message
-		{
-			minimized = HIWORD(wParam) != 0;
-			if (!main_loop) {
-				return 0;
-			};
-			if (LOWORD(wParam) == WA_ACTIVE || LOWORD(wParam) == WA_CLICKACTIVE) {
-
-				main_loop->notification(MainLoop::NOTIFICATION_WM_FOCUS_IN);
-				alt_mem=false;
-				control_mem=false;
-				shift_mem=false;
-				if (mouse_mode==MOUSE_MODE_CAPTURED || mouse_mode==MOUSE_MODE_CONFINED) {
-					RECT clipRect;
-					GetClientRect(hWnd, &clipRect);
-					ClientToScreen(hWnd, (POINT*) &clipRect.left);
-					ClientToScreen(hWnd, (POINT*) &clipRect.right);
-					ClipCursor(&clipRect);
-					SetCapture(hWnd);
-				}
-			} else {
-				main_loop->notification(MainLoop::NOTIFICATION_WM_FOCUS_OUT);
-				alt_mem=false;
-			};
-
-			return 0;								// Return To The Message Loop
-		}
-
-		case WM_PAINT:
-
-			Main::force_redraw();
-			break;
-
-		case WM_SYSCOMMAND:							// Intercept System Commands
-		{
-			switch (wParam)							// Check System Calls
-			{
-				case SC_SCREENSAVE:					// Screensaver Trying To Start?
-				case SC_MONITORPOWER:				// Monitor Trying To Enter Powersave?
-				return 0;							// Prevent From Happening
-				case SC_KEYMENU:
-					if ((lParam>>16)<=0)
-						return 0;
-			}
-			break;									// Exit
-		}
-
-		case WM_CLOSE:								// Did We Receive A Close Message?
-		{
-			if (main_loop)
-				main_loop->notification(MainLoop::NOTIFICATION_WM_QUIT_REQUEST);
-			//force_quit=true;
-			return 0;								// Jump Back
-		}
-		case WM_MOUSELEAVE: {
-
-			old_invalid=true;
-			outside=true;
-			if (main_loop && mouse_mode!=MOUSE_MODE_CAPTURED)
-				main_loop->notification(MainLoop::NOTIFICATION_WM_MOUSE_EXIT);
-			if (input)
-				input->set_mouse_in_window(false);
-
-		} break;
-		case WM_MOUSEMOVE: {
-
-			if (outside) {
-				//mouse enter
-
-				if (main_loop && mouse_mode!=MOUSE_MODE_CAPTURED)
-					main_loop->notification(MainLoop::NOTIFICATION_WM_MOUSE_ENTER);
-				if (input)
-					input->set_mouse_in_window(true);
-
-				CursorShape c=cursor_shape;
-				cursor_shape=CURSOR_MAX;
-				set_cursor_shape(c);
-				outside=false;
-
-				//Once-Off notification, must call again....
-				TRACKMOUSEEVENT tme;
-				tme.cbSize=sizeof(TRACKMOUSEEVENT);
-				tme.dwFlags=TME_LEAVE;
-				tme.hwndTrack=hWnd;
-				tme.dwHoverTime=HOVER_DEFAULT;
-				TrackMouseEvent(&tme);
-
-			}
-
-			// Don't calculate relative mouse movement if we don't have focus in CAPTURED mode.
-			if (!window_has_focus && mouse_mode==MOUSE_MODE_CAPTURED)
-				break;
-			/*
-			LPARAM extra = GetMessageExtraInfo();
-			if (IsPenEvent(extra)) {
-
-				int idx = extra & 0x7f;
-				_drag_event(idx, uMsg, wParam, lParam);
-				if (idx != 0) {
-					return 0;
-				};
-				// fallthrough for mouse event
-			};
-			*/
-
-
-			InputEvent event;
-			event.type=InputEvent::MOUSE_MOTION;
-			event.ID=++last_id;
-			InputEventMouseMotion &mm=event.mouse_motion;
-
-			mm.mod.control=(wParam&MK_CONTROL)!=0;
-			mm.mod.shift=(wParam&MK_SHIFT)!=0;
-			mm.mod.alt=alt_mem;
-
-			mm.button_mask|=(wParam&MK_LBUTTON)?(1<<0):0;
-			mm.button_mask|=(wParam&MK_RBUTTON)?(1<<1):0;
-			mm.button_mask|=(wParam&MK_MBUTTON)?(1<<2):0;
-			last_button_state=mm.button_mask;
-			/*mm.button_mask|=(wParam&MK_XBUTTON1)?(1<<5):0;
-			mm.button_mask|=(wParam&MK_XBUTTON2)?(1<<6):0;*/
-			mm.x=GET_X_LPARAM(lParam);
-			mm.y=GET_Y_LPARAM(lParam);
-			
-			if (mouse_mode==MOUSE_MODE_CAPTURED) {
-
-				Point2i c(video_mode.width/2,video_mode.height/2);
-				if (Point2i(mm.x,mm.y)==c) {
-					center=c;
-					return 0;
-				}
-
-				Point2i ncenter(mm.x,mm.y);
-				mm.x = old_x + (mm.x-center.x);
-				mm.y = old_y + (mm.y-center.y);
-				center=ncenter;
-				POINT pos = { (int) c.x, (int) c.y };
-				ClientToScreen(hWnd, &pos);
-				SetCursorPos(pos.x, pos.y);
-
-			}
-
-			input->set_mouse_pos(Point2(mm.x,mm.y));
-			mm.speed_x=input->get_last_mouse_speed().x;
-			mm.speed_y=input->get_last_mouse_speed().y;
-
-			if (old_invalid) {
-
-				old_x=mm.x;
-				old_y=mm.y;
-				old_invalid=false;
-			}
-
-			mm.relative_x=mm.x-old_x;
-			mm.relative_y=mm.y-old_y;
-			old_x=mm.x;
-			old_y=mm.y;
-			if (window_has_focus && main_loop)
-				input->parse_input_event(event);
-
-
-
-		} break;
-		case WM_LBUTTONDOWN:
-		case WM_LBUTTONUP:
-		case WM_MBUTTONDOWN:
-		case WM_MBUTTONUP:
-		case WM_RBUTTONDOWN:
-		case WM_RBUTTONUP:
-		case WM_MOUSEWHEEL:
-		case WM_MOUSEHWHEEL:
-		case WM_LBUTTONDBLCLK:
-		case WM_RBUTTONDBLCLK:
-		/*case WM_XBUTTONDOWN:
-		case WM_XBUTTONUP: */{
-
-			/*
-			LPARAM extra = GetMessageExtraInfo();
-			if (IsPenEvent(extra)) {
-
-				int idx = extra & 0x7f;
-				_touch_event(idx, uMsg, wParam, lParam);
-				if (idx != 0) {
-					return 0;
-				};
-				// fallthrough for mouse event
-			};
-			*/
-
-			InputEvent event;
-			event.type=InputEvent::MOUSE_BUTTON;
-			event.ID=++last_id;
-			InputEventMouseButton &mb=event.mouse_button;
-
-			switch (uMsg) {
-				case WM_LBUTTONDOWN: {
-					mb.pressed=true;
-					mb.button_index=1;
-				} break;
-				case WM_LBUTTONUP: {
-					mb.pressed=false;
-					mb.button_index=1;
-				} break;
-				case WM_MBUTTONDOWN: {
-					mb.pressed=true;
-					mb.button_index=3;
-
-				} break;
-				case WM_MBUTTONUP: {
-					mb.pressed=false;
-					mb.button_index=3;
-				} break;
-				case WM_RBUTTONDOWN: {
-					mb.pressed=true;
-					mb.button_index=2;
-				} break;
-				case WM_RBUTTONUP: {
-					mb.pressed=false;
-					mb.button_index=2;
-				} break;
-				case WM_LBUTTONDBLCLK: {
-
-					mb.pressed=true;
-					mb.button_index=1;
-					mb.doubleclick = true;
-				} break;
-				case WM_RBUTTONDBLCLK: {
-
-					mb.pressed=true;
-					mb.button_index=2;
-					mb.doubleclick = true;
-				} break;
-				case WM_MOUSEWHEEL: {
-
-					mb.pressed=true;
-					int motion = (short)HIWORD(wParam);
-					if (!motion)
-						return 0;
-
-
-					if (motion>0)
-						mb.button_index= BUTTON_WHEEL_UP;
-					else
-						mb.button_index= BUTTON_WHEEL_DOWN;
-
-
-				} break;
-				case WM_MOUSEHWHEEL: {
-
-					mb.pressed = true;
-					int motion = (short)HIWORD(wParam);
-					if (!motion)
-						return 0;
-
-					if (motion<0)
-						mb.button_index = BUTTON_WHEEL_LEFT;
-					else
-						mb.button_index = BUTTON_WHEEL_RIGHT;
-				} break;
-					/*
-				case WM_XBUTTONDOWN: {
-					mb.pressed=true;
-					mb.button_index=(HIWORD(wParam)==XBUTTON1)?6:7;
-				} break;
-				case WM_XBUTTONUP:
-					mb.pressed=true;
-					mb.button_index=(HIWORD(wParam)==XBUTTON1)?6:7;
-				} break;*/
-				default: { return 0; }
-			}
-
-
-			mb.mod.control=(wParam&MK_CONTROL)!=0;
-			mb.mod.shift=(wParam&MK_SHIFT)!=0;
-			mb.mod.alt=alt_mem;
-			//mb.mod.alt=(wParam&MK_MENU)!=0;
-			mb.button_mask|=(wParam&MK_LBUTTON)?(1<<0):0;
-			mb.button_mask|=(wParam&MK_RBUTTON)?(1<<1):0;
-			mb.button_mask|=(wParam&MK_MBUTTON)?(1<<2):0;
-
-			last_button_state=mb.button_mask;
-			/*
-			mb.button_mask|=(wParam&MK_XBUTTON1)?(1<<5):0;
-			mb.button_mask|=(wParam&MK_XBUTTON2)?(1<<6):0;*/
-			mb.x=GET_X_LPARAM(lParam);
-			mb.y=GET_Y_LPARAM(lParam);
-
-			if (mouse_mode==MOUSE_MODE_CAPTURED) {
-
-				mb.x=old_x;
-				mb.y=old_y;
-			}
-
-			mb.global_x=mb.x;
-			mb.global_y=mb.y;
-
-
-			if (uMsg != WM_MOUSEWHEEL) {
-				if (mb.pressed) {
-
-					if (++pressrc>0)
-						SetCapture(hWnd);
-				} else {
-
-
-					if (--pressrc<=0) {
-						ReleaseCapture();
-						pressrc=0;
-					}
-
-				}
-			} else if (mouse_mode!=MOUSE_MODE_CAPTURED) {
-				// for reasons unknown to mankind, wheel comes in screen cordinates
-				POINT coords;
-				coords.x = mb.x;
-				coords.y = mb.y;
-
-				ScreenToClient(hWnd, &coords);
-
-				mb.x = coords.x;
-				mb.y = coords.y;
-			}
-
-			if (main_loop) {
-				input->parse_input_event(event);
-				if (mb.pressed && mb.button_index>3) {
-					//send release for mouse wheel
-					mb.pressed=false;
-					event.ID=++last_id;
-					input->parse_input_event(event);
-
-				}
-			}
-
-
-
-		} break;
-
-		case WM_SIZE: {
-			int window_w = LOWORD(lParam);
-			int window_h = HIWORD(lParam);
-			if (window_w > 0 && window_h > 0) {
-				video_mode.width = window_w;
-				video_mode.height = window_h;
-			}
-			//return 0;								// Jump Back
-		} break;
-
-		case WM_ENTERSIZEMOVE: {
-			move_timer_id = SetTimer(hWnd, 1, USER_TIMER_MINIMUM,(TIMERPROC) NULL);
-		} break;
-		case WM_EXITSIZEMOVE: {
-			KillTimer(hWnd, move_timer_id);
-		} break;
-		case WM_TIMER: {
-			if (wParam == move_timer_id) {
-				process_key_events();
-				Main::iteration();
-			}
-		} break;
-
-		case WM_SYSKEYDOWN:
-		case WM_SYSKEYUP:
-		case WM_KEYUP:
-		case WM_KEYDOWN: {
-
-
-			if (wParam==VK_SHIFT)
-				shift_mem=uMsg==WM_KEYDOWN;
-			if (wParam==VK_CONTROL)
-				control_mem=uMsg==WM_KEYDOWN;
-			if (wParam==VK_MENU) {
-				alt_mem=(uMsg==WM_KEYDOWN || uMsg==WM_SYSKEYDOWN);
-				if (lParam&(1<<24))
-					gr_mem=alt_mem;
-			}
-
-			/*
-			if (wParam==VK_WIN) TODO wtf is this?
-				meta_mem=uMsg==WM_KEYDOWN;
-			*/
-
-
-		} //fallthrough
-		case WM_CHAR: {
-
-			ERR_BREAK(key_event_pos >= KEY_EVENT_BUFFER_SIZE);
-
-			// Make sure we don't include modifiers for the modifier key itself.
-			KeyEvent ke;
-			ke.mod_state.shift= (wParam != VK_SHIFT) ? shift_mem : false;
-			ke.mod_state.alt= (! (wParam == VK_MENU && (uMsg == WM_KEYDOWN || uMsg == WM_SYSKEYDOWN))) ? alt_mem : false;
-			ke.mod_state.control= (wParam != VK_CONTROL) ? control_mem : false;
-			ke.mod_state.meta=meta_mem;
-			ke.uMsg=uMsg;
-
-			if (ke.uMsg==WM_SYSKEYDOWN)
-				ke.uMsg=WM_KEYDOWN;
-			if (ke.uMsg==WM_SYSKEYUP)
-				ke.uMsg=WM_KEYUP;
-
-
-			/*if (ke.uMsg==WM_KEYDOWN && alt_mem && uMsg!=WM_SYSKEYDOWN) {
-				//altgr hack for intl keyboards, not sure how good it is
-				//windows is weeeeird
-				ke.mod_state.alt=false;
-				ke.mod_state.control=false;
-				print_line("")
-			}*/
-
-
-			ke.wParam=wParam;
-			ke.lParam=lParam;
-			key_event_buffer[key_event_pos++]=ke;
-
-		} break;
-		case WM_INPUTLANGCHANGEREQUEST: {
-
-			print_line("input lang change");
-		} break;
-
-		#if WINVER >= 0x0601 // for windows 7
-		case WM_TOUCH: {
-
-			BOOL bHandled = FALSE;
-			UINT cInputs = LOWORD(wParam);
-			PTOUCHINPUT pInputs = memnew_arr(TOUCHINPUT, cInputs);
-			if (pInputs){
-				if (GetTouchInputInfo((HTOUCHINPUT)lParam, cInputs, pInputs, sizeof(TOUCHINPUT))){
-					for (UINT i=0; i < cInputs; i++){
-						TOUCHINPUT ti = pInputs[i];
-						//do something with each touch input entry
-						if (ti.dwFlags & TOUCHEVENTF_MOVE) {
-
-							_drag_event(ti.x / 100, ti.y / 100, ti.dwID);
-						} else if (ti.dwFlags & (TOUCHEVENTF_UP | TOUCHEVENTF_DOWN)) {
-
-							_touch_event(ti.dwFlags & TOUCHEVENTF_DOWN != 0, ti.x / 100, ti.y / 100, ti.dwID);
-						};
-					}
-					bHandled = TRUE;
-				}else{
-					 /* handle the error here */
-				}
-				memdelete_arr(pInputs);
-			}else{
-				/* handle the error here, probably out of memory */
-			}
-			if (bHandled) {
-				CloseTouchInputHandle((HTOUCHINPUT)lParam);
-				return 0;
-			};
-
-		} break;
-
-		#endif
-		case WM_DEVICECHANGE: {
-
-			joypad->probe_joypads();
-		} break;
-		case WM_SETCURSOR: {
-			if(LOWORD(lParam) == HTCLIENT) {
-				if(window_has_focus && (mouse_mode == MOUSE_MODE_HIDDEN || mouse_mode == MOUSE_MODE_CAPTURED)) {
-					//Hide the cursor
-					if(hCursor == NULL)
-						hCursor = SetCursor(NULL);
-					else
-						SetCursor(NULL);
-				}
-				else {
-					if(hCursor != NULL) {
-						SetCursor(hCursor);
-						hCursor = NULL;
-					}
-				}
-			}
-
-		} break;
-		case WM_DROPFILES: {
-
-			HDROP hDropInfo = NULL;
-			hDropInfo = (HDROP) wParam;
-			const int buffsize=4096;
-			wchar_t buf[buffsize];
-
-			int fcount = DragQueryFileW(hDropInfo, 0xFFFFFFFF,NULL,0);
-
-			Vector<String> files;
-
-			for(int i=0;i<fcount;i++) {
-
-				DragQueryFileW(hDropInfo, i, buf, buffsize);
-				String file=buf;
-				files.push_back(file);
-			}
-
-			if (files.size() && main_loop) {
-				main_loop->drop_files(files,0);
-			}
-
-
-		} break;
-
-
-
-		default: {
-
-			if (user_proc) {
-
-				return CallWindowProcW(user_proc, hWnd, uMsg, wParam, lParam);
-			};
-		};
-	}
-
-	return DefWindowProcW(hWnd,uMsg,wParam,lParam);
-
-}
-
-LRESULT CALLBACK WndProc(HWND	hWnd,UINT uMsg,	WPARAM	wParam,	LPARAM	lParam)	{
-
-	OS_Windows *os_win = static_cast<OS_Windows*>(OS::get_singleton());
-	if (os_win)
-		return os_win->WndProc(hWnd,uMsg,wParam,lParam);
-	else
-		return DefWindowProcW(hWnd,uMsg,wParam,lParam);
-
-}
-
-
-
-void OS_Windows::process_key_events() {
-
-	for(int i=0;i<key_event_pos;i++) {
-
-		KeyEvent &ke = key_event_buffer[i];
-		switch(ke.uMsg) {
-
-			case WM_CHAR: {
-                if ((i==0 && ke.uMsg==WM_CHAR) || (i>0 && key_event_buffer[i-1].uMsg==WM_CHAR))
-                {
-				    InputEvent event;
-				    event.type=InputEvent::KEY;
-				    event.ID=++last_id;
-				    InputEventKey &k=event.key;
-
-
-				    k.mod=ke.mod_state;
-				    k.pressed=true;
-				    k.scancode=KeyMappingWindows::get_keysym(ke.wParam);
-				    k.unicode=ke.wParam;
-				    if (k.unicode && gr_mem) {
-					    k.mod.alt=false;
-					    k.mod.control=false;
-				    }
-
-				    if (k.unicode<32)
-					    k.unicode=0;
-
-				    input->parse_input_event(event);
-                }
-
-				//do nothing
-			} break;
-			case WM_KEYUP:
-			case WM_KEYDOWN: {
-
-
-				InputEvent event;
-				event.type=InputEvent::KEY;
-				event.ID=++last_id;
-				InputEventKey &k=event.key;
-
-
-				k.mod=ke.mod_state;
-				k.pressed=(ke.uMsg==WM_KEYDOWN);
-
-				k.scancode=KeyMappingWindows::get_keysym(ke.wParam);
-				if (i+1 < key_event_pos && key_event_buffer[i+1].uMsg==WM_CHAR)
-					k.unicode=key_event_buffer[i+1].wParam;
-				if (k.unicode && gr_mem) {
-					k.mod.alt=false;
-					k.mod.control=false;
-				}
-
-				if (k.unicode<32)
-					k.unicode=0;
-
-
-
-				k.echo=(ke.uMsg==WM_KEYDOWN && (ke.lParam&(1<<30)));
-
-				input->parse_input_event(event);
-
-
-			} break;
-		}
-	}
-
-	key_event_pos=0;
-}
-
-enum _MonitorDpiType
-{
-	MDT_Effective_DPI  = 0,
-	MDT_Angular_DPI    = 1,
-	MDT_Raw_DPI        = 2,
-	MDT_Default        = MDT_Effective_DPI
-};
-
-
-static int QueryDpiForMonitor(HMONITOR hmon, _MonitorDpiType dpiType= MDT_Default)
-{
-
-
-	int dpiX = 96, dpiY = 96;
-
-	static HMODULE Shcore = NULL;
-	typedef HRESULT (WINAPI* GetDPIForMonitor_t)(HMONITOR hmonitor, _MonitorDpiType dpiType, UINT *dpiX, UINT *dpiY);
-	static GetDPIForMonitor_t getDPIForMonitor = NULL;
-
-	if (Shcore == NULL)
-	{
-		Shcore = LoadLibraryW(L"Shcore.dll");
-		getDPIForMonitor = Shcore ? (GetDPIForMonitor_t)GetProcAddress(Shcore, "GetDpiForMonitor") : NULL;
-
-		if ((Shcore == NULL) || (getDPIForMonitor == NULL))
-		{
-			if (Shcore)
-				FreeLibrary(Shcore);
-			Shcore = (HMODULE)INVALID_HANDLE_VALUE;
-		}
-	}
-
-	UINT x = 0, y = 0;
-	HRESULT hr = E_FAIL;
-	bool bSet = false;
-	if (hmon && (Shcore != (HMODULE)INVALID_HANDLE_VALUE))
-	{
-		hr = getDPIForMonitor(hmon, dpiType/*MDT_Effective_DPI*/, &x, &y);
-		if (SUCCEEDED(hr) && (x > 0) && (y > 0))
-		{
-
-			dpiX = (int)x;
-			dpiY = (int)y;
-		}
-	}
-	else
-	{
-		static int overallX = 0, overallY = 0;
-		if (overallX <= 0 || overallY <= 0)
-		{
-			HDC hdc = GetDC(NULL);
-			if (hdc)
-			{
-				overallX = GetDeviceCaps(hdc, LOGPIXELSX);
-				overallY = GetDeviceCaps(hdc, LOGPIXELSY);
-				ReleaseDC(NULL, hdc);
-			}
-		}
-		if (overallX > 0 && overallY > 0)
-		{
-			dpiX = overallX; dpiY = overallY;
-		}
-	}
-
-
-	return (dpiX+dpiY)/2;
-}
-
-
-BOOL CALLBACK OS_Windows::MonitorEnumProc(HMONITOR hMonitor, HDC hdcMonitor, LPRECT lprcMonitor,  LPARAM dwData) {
-	OS_Windows *self=(OS_Windows*)OS::get_singleton();
-	MonitorInfo minfo;
-	minfo.hMonitor=hMonitor;
-	minfo.hdcMonitor=hdcMonitor;
-	minfo.rect.pos.x=lprcMonitor->left;
-	minfo.rect.pos.y=lprcMonitor->top;
-	minfo.rect.size.x=lprcMonitor->right - lprcMonitor->left;
-	minfo.rect.size.y=lprcMonitor->bottom - lprcMonitor->top;
-
-	minfo.dpi = QueryDpiForMonitor(hMonitor);
-
-	self->monitor_info.push_back(minfo);
-
-	return TRUE;
-}
-
-
-void OS_Windows::initialize(const VideoMode& p_desired,int p_video_driver,int p_audio_driver) {
-
-
-
-    main_loop=NULL;
-    outside=true;
-	window_has_focus=true;
-	WNDCLASSEXW	wc;
-
-	video_mode=p_desired;
-	//printf("**************** desired %s, mode %s\n", p_desired.fullscreen?"true":"false", video_mode.fullscreen?"true":"false");
-	RECT WindowRect;
-
-	WindowRect.left=0;
-	WindowRect.right=video_mode.width;
-	WindowRect.top=0;
-	WindowRect.bottom=video_mode.height;
-
-	memset(&wc,0,sizeof(WNDCLASSEXW));
-	wc.cbSize=sizeof(WNDCLASSEXW);
-	wc.style= CS_HREDRAW | CS_VREDRAW | CS_OWNDC | CS_DBLCLKS;
-	wc.lpfnWndProc = (WNDPROC)::WndProc;
-	wc.cbClsExtra = 0;
-	wc.cbWndExtra= 0;
-	//wc.hInstance = hInstance;
-	wc.hInstance = godot_hinstance ? godot_hinstance : GetModuleHandle(NULL);
-	wc.hIcon = LoadIcon(NULL, IDI_WINLOGO);
-	wc.hCursor = NULL;//LoadCursor(NULL, IDC_ARROW);
-	wc.hbrBackground = NULL;
-	wc.lpszMenuName	= NULL;
-	wc.lpszClassName	= L"Engine";
-
-	if (!RegisterClassExW(&wc)) {
-		MessageBox(NULL,"Failed To Register The Window Class.","ERROR",MB_OK|MB_ICONEXCLAMATION);
-		return;											// Return
-	}
-
-
-	EnumDisplayMonitors(NULL,NULL,MonitorEnumProc,0);
-
-	print_line("DETECTED MONITORS: "+itos(monitor_info.size()));
-	pre_fs_valid=true;
-	if (video_mode.fullscreen) {
-
-		DEVMODE current;
-		memset(&current,0,sizeof(current));
-		EnumDisplaySettings(NULL, ENUM_CURRENT_SETTINGS, &current);
-
-		WindowRect.right  = current.dmPelsWidth;
-		WindowRect.bottom = current.dmPelsHeight;
-
-/*  DEVMODE dmScreenSettings;
-		memset(&dmScreenSettings,0,sizeof(dmScreenSettings));
-		dmScreenSettings.dmSize=sizeof(dmScreenSettings);
-		dmScreenSettings.dmPelsWidth	= video_mode.width;
-		dmScreenSettings.dmPelsHeight	= video_mode.height;
-		dmScreenSettings.dmBitsPerPel	= current.dmBitsPerPel;
-		dmScreenSettings.dmFields=DM_BITSPERPEL|DM_PELSWIDTH|DM_PELSHEIGHT;
-
-		LONG err = ChangeDisplaySettings(&dmScreenSettings,CDS_FULLSCREEN);
-		if (err!=DISP_CHANGE_SUCCESSFUL) {
-
-			video_mode.fullscreen=false;
-		}*/
-		pre_fs_valid=false;
-	}
-
-	DWORD		dwExStyle;
-	DWORD		dwStyle;
-
-	if (video_mode.fullscreen||video_mode.borderless_window) {
-
-		dwExStyle=WS_EX_APPWINDOW;
-		dwStyle=WS_POPUP;
-
-	} else {
-		dwExStyle=WS_EX_APPWINDOW | WS_EX_WINDOWEDGE;
-		dwStyle=WS_OVERLAPPEDWINDOW;
-		if (!video_mode.resizable) {
-			dwStyle &= ~WS_THICKFRAME;
-			dwStyle &= ~WS_MAXIMIZEBOX;
-		}
-	}
-
-	AdjustWindowRectEx(&WindowRect, dwStyle, FALSE, dwExStyle);
-
-
-	char* windowid = getenv("GODOT_WINDOWID");
-	if (windowid) {
-
-		// strtoull on mingw
-		#ifdef MINGW_ENABLED
-		hWnd = (HWND)strtoull(windowid, NULL, 0);
-		#else
-		hWnd = (HWND)_strtoui64(windowid, NULL, 0);
-		#endif
-		SetLastError(0);
-		user_proc = (WNDPROC)GetWindowLongPtr(hWnd, GWLP_WNDPROC);
-		SetWindowLongPtr(hWnd, GWLP_WNDPROC, (LONG_PTR)(WNDPROC)::WndProc);
-		DWORD le = GetLastError();
-		if (user_proc == 0 && le != 0) {
-
-			printf("Error setting WNDPROC: %li\n", le);
-		};
-		LONG_PTR proc = GetWindowLongPtr(hWnd, GWLP_WNDPROC);
-
-		RECT rect;
-		if (!GetClientRect(hWnd, &rect)) {
-			MessageBoxW(NULL,L"Window Creation Error.",L"ERROR",MB_OK|MB_ICONEXCLAMATION);
-			return;								// Return FALSE
-		};
-		video_mode.width = rect.right;
-		video_mode.height = rect.bottom;
-		video_mode.fullscreen = false;
-	} else {
-
-		if (!(hWnd=CreateWindowExW(dwExStyle,L"Engine",L"", dwStyle|WS_CLIPSIBLINGS|WS_CLIPCHILDREN, (GetSystemMetrics(SM_CXSCREEN)-WindowRect.right)/2, (GetSystemMetrics(SM_CYSCREEN)-WindowRect.bottom)/2, WindowRect.right-WindowRect.left,WindowRect.bottom-WindowRect.top, NULL,NULL, hInstance,NULL))) {
-			MessageBoxW(NULL,L"Window Creation Error.",L"ERROR",MB_OK|MB_ICONEXCLAMATION);
-			return;								// Return FALSE
-		}
-
-
-	};
-
-#if defined(OPENGL_ENABLED)
-	gl_context = memnew( ContextGL_Win(hWnd,true) );
-	gl_context->initialize();
-
-	RasterizerGLES3::register_config();
-
-	RasterizerGLES3::make_current();
-#else
-	// FIXME: Does DX support still work now that rasterizer is no longer used?
-#ifdef DX9_ENABLED
-	rasterizer = memnew( RasterizerDX9(hWnd) );
-#endif
-#endif
-
-	visual_server = memnew( VisualServerRaster );
- 	// FIXME: Reimplement threaded rendering? Or remove?
-	/*
-	if (get_render_thread_mode()!=RENDER_THREAD_UNSAFE) {
-		visual_server =memnew(VisualServerWrapMT(visual_server,get_render_thread_mode()==RENDER_SEPARATE_THREAD));
-	}
-	*/
-
-	physics_server = memnew( PhysicsServerSW );
-	physics_server->init();
-
-	physics_2d_server = Physics2DServerWrapMT::init_server<Physics2DServerSW>();
-	physics_2d_server->init();
-
-	if (!is_no_window_mode_enabled()) {
-		ShowWindow(hWnd,SW_SHOW);						// Show The Window
-		SetForegroundWindow(hWnd);						// Slightly Higher Priority
-		SetFocus(hWnd);									// Sets Keyboard Focus To
-	}
-
-/*
-		DEVMODE dmScreenSettings;					// Device Mode
-		memset(&dmScreenSettings,0,sizeof(dmScreenSettings));		// Makes Sure Memory's Cleared
-		dmScreenSettings.dmSize=sizeof(dmScreenSettings);		// Size Of The Devmode Structure
-		dmScreenSettings.dmPelsWidth	= width;			// Selected Screen Width
-		dmScreenSettings.dmPelsHeight	= height;			// Selected Screen Height
-		dmScreenSettings.dmBitsPerPel	= bits;				// Selected Bits Per Pixel
-		dmScreenSettings.dmFields=DM_BITSPERPEL|DM_PELSWIDTH|DM_PELSHEIGHT;
-		if (ChangeDisplaySettings(&dmScreenSettings,CDS_FULLSCREEN)!=DISP_CHANGE_SUCCESSFUL)
-
-
-
-
-  */
-	visual_server->init();
-
-	input = memnew( InputDefault );
-	joypad = memnew (JoypadWindows(input, &hWnd));
-
-	AudioDriverManager::get_driver(p_audio_driver)->set_singleton();
-
-	if (AudioDriverManager::get_driver(p_audio_driver)->init()!=OK) {
-
-		ERR_PRINT("Initializing audio failed.");
-	}
-
-	TRACKMOUSEEVENT tme;
-	tme.cbSize=sizeof(TRACKMOUSEEVENT);
-	tme.dwFlags=TME_LEAVE;
-	tme.hwndTrack=hWnd;
-	tme.dwHoverTime=HOVER_DEFAULT;
-	TrackMouseEvent(&tme);
-
-	//RegisterTouchWindow(hWnd, 0); // Windows 7
-
-	_ensure_data_dir();
-
-	DragAcceptFiles(hWnd,true);
-
-	move_timer_id = 1;
-}
-
-void OS_Windows::set_clipboard(const String& p_text) {
-
-	if (!OpenClipboard(hWnd)) {
-		ERR_EXPLAIN("Unable to open clipboard.");
-		ERR_FAIL();
-	};
-	EmptyClipboard();
-
-	HGLOBAL mem = GlobalAlloc(GMEM_MOVEABLE, (p_text.length() + 1) * sizeof(CharType));
-	if (mem == NULL) {
-		ERR_EXPLAIN("Unable to allocate memory for clipboard contents.");
-		ERR_FAIL();
-	};
-	LPWSTR lptstrCopy = (LPWSTR)GlobalLock(mem);
-	memcpy(lptstrCopy, p_text.c_str(), (p_text.length() + 1) * sizeof(CharType));
-	//memset((lptstrCopy + p_text.length()), 0, sizeof(CharType));
-	GlobalUnlock(mem);
-
-	SetClipboardData(CF_UNICODETEXT, mem);
-
-	// set the CF_TEXT version (not needed?)
-	CharString utf8 = p_text.utf8();
-	mem = GlobalAlloc(GMEM_MOVEABLE, utf8.length() + 1);
-	if (mem == NULL) {
-		ERR_EXPLAIN("Unable to allocate memory for clipboard contents.");
-		ERR_FAIL();
-	};
-	LPTSTR ptr = (LPTSTR)GlobalLock(mem);
-	memcpy(ptr, utf8.get_data(), utf8.length());
-	ptr[utf8.length()] = 0;
-	GlobalUnlock(mem);
-
-	SetClipboardData(CF_TEXT, mem);
-
-	CloseClipboard();
-};
-
-String OS_Windows::get_clipboard() const {
-
-	String ret;
-	if (!OpenClipboard(hWnd)) {
-		ERR_EXPLAIN("Unable to open clipboard.");
-		ERR_FAIL_V("");
-	};
-
-	if (IsClipboardFormatAvailable(CF_UNICODETEXT)) {
-
-		HGLOBAL mem = GetClipboardData(CF_UNICODETEXT);
-		if (mem != NULL) {
-
-			LPWSTR ptr = (LPWSTR)GlobalLock(mem);
-			if (ptr != NULL) {
-
-				ret = String((CharType*)ptr);
-				GlobalUnlock(mem);
-			};
-		};
-
-	} else if (IsClipboardFormatAvailable(CF_TEXT)) {
-
-		HGLOBAL mem = GetClipboardData(CF_UNICODETEXT);
-		if (mem != NULL) {
-
-			LPTSTR ptr = (LPTSTR)GlobalLock(mem);
-			if (ptr != NULL) {
-
-				ret.parse_utf8((const char*)ptr);
-				GlobalUnlock(mem);
-			};
-		};
-	};
-
-	CloseClipboard();
-
-	return ret;
-};
-
 
 void OS_Windows::delete_main_loop() {
-
 	if (main_loop)
 		memdelete(main_loop);
-	main_loop=NULL;
+	main_loop = nullptr;
 }
 
-void OS_Windows::set_main_loop( MainLoop * p_main_loop ) {
-
-	input->set_main_loop(p_main_loop);
-	main_loop=p_main_loop;
+void OS_Windows::set_main_loop(MainLoop *p_main_loop) {
+	main_loop = p_main_loop;
 }
 
 void OS_Windows::finalize() {
+#ifdef WINMIDI_ENABLED
+	driver_midi.close();
+#endif
 
-	if(main_loop)
+	if (main_loop)
 		memdelete(main_loop);
 
-	main_loop=NULL;
-
-	memdelete(joypad);
-	memdelete(input);
-
-	visual_server->finish();
-	memdelete(visual_server);
-#ifdef OPENGL_ENABLED
-	if (gl_context)
-		memdelete(gl_context);
-#endif
-	if (rasterizer)
-		memdelete(rasterizer);
-
-	if (user_proc) {
-		SetWindowLongPtr(hWnd, GWLP_WNDPROC, (LONG_PTR)user_proc);
-	};
-
-	/*
-	if (debugger_connection_console) {
-		memdelete(debugger_connection_console);
-	}
-	*/
-
-	physics_server->finish();
-	memdelete(physics_server);
-
-	physics_2d_server->finish();
-	memdelete(physics_2d_server);
-
-	monitor_info.clear();
-
+	main_loop = nullptr;
 }
+
 void OS_Windows::finalize_core() {
+	timeEndPeriod(1);
 
 	memdelete(process_map);
-
-
-	TCPServerWinsock::cleanup();
-	StreamPeerWinsock::cleanup();
+	NetSocketPosix::cleanup();
 }
 
-void OS_Windows::vprint(const char* p_format, va_list p_list, bool p_stderr) {
+Error OS_Windows::open_dynamic_library(const String p_path, void *&p_library_handle, bool p_also_set_library_path) {
+	String path = p_path.replace("/", "\\");
 
-	const unsigned int BUFFER_SIZE = 16384;
-	char buf[BUFFER_SIZE+1]; // +1 for the terminating character
-	int len = vsnprintf(buf,BUFFER_SIZE,p_format,p_list);
-	if (len<=0)
-		return;
-	if(len >= BUFFER_SIZE)
-		len = BUFFER_SIZE; // Output is too big, will be truncated
-	buf[len]=0;
-
-
-	int wlen = MultiByteToWideChar(CP_UTF8,0,buf,len,NULL,0);
-	if (wlen<0)
-		return;
-
-	wchar_t *wbuf = (wchar_t*)malloc((len+1)*sizeof(wchar_t));
-	MultiByteToWideChar(CP_UTF8,0,buf,len,wbuf,wlen);
-	wbuf[wlen]=0;
-
-	if (p_stderr)
-		fwprintf(stderr, L"%ls", wbuf);
-	else
-		wprintf(L"%ls", wbuf);
-
-#ifdef STDOUT_FILE
-	//vwfprintf(stdo,p_format,p_list);
-#endif
-	free(wbuf);
-
-	fflush(stdout);
-};
-
-void OS_Windows::alert(const String& p_alert,const String& p_title) {
-
-	if (!is_no_window_mode_enabled())
-		MessageBoxW(NULL, p_alert.c_str(), p_title.c_str(), MB_OK | MB_ICONEXCLAMATION | MB_TASKMODAL);
-	else
-		print_line("ALERT: "+p_alert);
-}
-
-void OS_Windows::set_mouse_mode(MouseMode p_mode) {
-
-	if (mouse_mode==p_mode)
-		return;
-	mouse_mode=p_mode;
-	if (mouse_mode==MOUSE_MODE_CAPTURED || mouse_mode==MOUSE_MODE_CONFINED) {
-		RECT clipRect;
-		GetClientRect(hWnd, &clipRect);
-		ClientToScreen(hWnd, (POINT*) &clipRect.left);
-		ClientToScreen(hWnd, (POINT*) &clipRect.right);
-		ClipCursor(&clipRect);
-		center=Point2i(video_mode.width/2,video_mode.height/2);
-		POINT pos = { (int) center.x, (int) center.y };
-		ClientToScreen(hWnd, &pos);
-		if (mouse_mode==MOUSE_MODE_CAPTURED)
-			SetCursorPos(pos.x, pos.y);
-	} else {
-		ReleaseCapture();
-		ClipCursor(NULL);
+	if (!FileAccess::exists(path)) {
+		//this code exists so gdnative can load .dll files from within the executable path
+		path = get_executable_path().get_base_dir().plus_file(p_path.get_file());
 	}
 
-	if (p_mode == MOUSE_MODE_CAPTURED || p_mode == MOUSE_MODE_HIDDEN) {
-		hCursor = SetCursor(NULL);
-	} else {
-		SetCursor(hCursor);
-	}
-}
+	typedef DLL_DIRECTORY_COOKIE(WINAPI * PAddDllDirectory)(PCWSTR);
+	typedef BOOL(WINAPI * PRemoveDllDirectory)(DLL_DIRECTORY_COOKIE);
 
-OS_Windows::MouseMode OS_Windows::get_mouse_mode() const{
+	PAddDllDirectory add_dll_directory = (PAddDllDirectory)GetProcAddress(GetModuleHandle("kernel32.dll"), "AddDllDirectory");
+	PRemoveDllDirectory remove_dll_directory = (PRemoveDllDirectory)GetProcAddress(GetModuleHandle("kernel32.dll"), "RemoveDllDirectory");
 
+	bool has_dll_directory_api = ((add_dll_directory != nullptr) && (remove_dll_directory != nullptr));
+	DLL_DIRECTORY_COOKIE cookie = nullptr;
 
-	return mouse_mode;
-}
-
-
-
-void OS_Windows::warp_mouse_pos(const Point2& p_to) {
-
-	if (mouse_mode==MOUSE_MODE_CAPTURED) {
-
-		old_x=p_to.x;
-		old_y=p_to.y;
-	} else {
-
-		POINT p;
-		p.x=p_to.x;
-		p.y=p_to.y;
-		ClientToScreen(hWnd,&p);
-
-		SetCursorPos(p.x,p.y);
-	}
-}
-
-Point2 OS_Windows::get_mouse_pos() const {
-
-	return Point2(old_x, old_y);
-}
-
-int OS_Windows::get_mouse_button_state() const {
-
-	return last_button_state;
-}
-
-void OS_Windows::set_window_title(const String& p_title) {
-
-	SetWindowTextW(hWnd,p_title.c_str());
-}
-
-void OS_Windows::set_video_mode(const VideoMode& p_video_mode,int p_screen) {
-
-
-}
-
-OS::VideoMode OS_Windows::get_video_mode(int p_screen) const {
-
-	return video_mode;
-}
-void OS_Windows::get_fullscreen_mode_list(List<VideoMode> *p_list,int p_screen) const {
-
-
-}
-
-int OS_Windows::get_screen_count() const {
-
-	return monitor_info.size();
-}
-int OS_Windows::get_current_screen() const{
-
-	HMONITOR monitor = MonitorFromWindow(hWnd,MONITOR_DEFAULTTONEAREST);
-	for(int i=0;i<monitor_info.size();i++) {
-		if (monitor_info[i].hMonitor==monitor)
-			return i;
+	if (p_also_set_library_path && has_dll_directory_api) {
+		cookie = add_dll_directory((LPCWSTR)(path.get_base_dir().utf16().get_data()));
 	}
 
-	return 0;
-}
-void OS_Windows::set_current_screen(int p_screen){
+	p_library_handle = (void *)LoadLibraryExW((LPCWSTR)(path.utf16().get_data()), nullptr, (p_also_set_library_path && has_dll_directory_api) ? LOAD_LIBRARY_SEARCH_DEFAULT_DIRS : 0);
+	ERR_FAIL_COND_V_MSG(!p_library_handle, ERR_CANT_OPEN, "Can't open dynamic library: " + p_path + ", error: " + format_error_message(GetLastError()) + ".");
 
-	ERR_FAIL_INDEX(p_screen,monitor_info.size());
-
-	Vector2 ofs = get_window_position() - get_screen_position(get_current_screen());
-	set_window_position(ofs+get_screen_position(p_screen));
-
-}
-
-Point2 OS_Windows::get_screen_position(int p_screen) const{
-
-	ERR_FAIL_INDEX_V(p_screen,monitor_info.size(),Point2());
-	return Vector2( monitor_info[p_screen].rect.pos );
-
-}
-Size2 OS_Windows::get_screen_size(int p_screen) const{
-
-	ERR_FAIL_INDEX_V(p_screen,monitor_info.size(),Point2());
-	return Vector2( monitor_info[p_screen].rect.size );
-
-}
-
-int OS_Windows::get_screen_dpi(int p_screen) const {
-
-	ERR_FAIL_INDEX_V(p_screen,monitor_info.size(),72);
-	UINT dpix,dpiy;
-	return monitor_info[p_screen].dpi;
-
-}
-Point2 OS_Windows::get_window_position() const{
-
-	RECT r;
-	GetWindowRect(hWnd,&r);
-	return Point2(r.left,r.top);
-}
-void OS_Windows::set_window_position(const Point2& p_position){
-
-	if (video_mode.fullscreen) return;
-	RECT r;
-	GetWindowRect(hWnd,&r);
-	MoveWindow(hWnd,p_position.x,p_position.y,r.right-r.left,r.bottom-r.top,TRUE);
-
-}
-Size2 OS_Windows::get_window_size() const{
-
-	RECT r;
-	GetClientRect(hWnd,&r);
-	return Vector2(r.right-r.left,r.bottom-r.top);
-
-}
-void OS_Windows::set_window_size(const Size2 p_size){
-
-	video_mode.width=p_size.width;
-	video_mode.height=p_size.height;
-
-	if (video_mode.fullscreen) {
-		return;
+	if (cookie) {
+		remove_dll_directory(cookie);
 	}
 
-
-	RECT crect;
-	GetClientRect(hWnd,&crect);
-
-	RECT rect;
-	GetWindowRect(hWnd,&rect);
-	int dx = (rect.right-rect.left)-(crect.right-crect.left);
-	int dy = (rect.bottom-rect.top)-(crect.bottom-crect.top);
-
-	rect.right=rect.left+p_size.width+dx;
-	rect.bottom=rect.top+p_size.height+dy;
-
-
-	//print_line("PRE: "+itos(rect.left)+","+itos(rect.top)+","+itos(rect.right-rect.left)+","+itos(rect.bottom-rect.top));
-
-	/*if (video_mode.resizable) {
-		AdjustWindowRect(&rect, WS_OVERLAPPEDWINDOW, FALSE);
-	} else {
-		AdjustWindowRect(&rect, WS_CAPTION | WS_POPUPWINDOW, FALSE);
-	}*/
-
-	//print_line("POST: "+itos(rect.left)+","+itos(rect.top)+","+itos(rect.right-rect.left)+","+itos(rect.bottom-rect.top));
-
-	MoveWindow(hWnd,rect.left,rect.top,rect.right-rect.left,rect.bottom-rect.top,TRUE);
-
+	return OK;
 }
-void OS_Windows::set_window_fullscreen(bool p_enabled){
 
-	if (video_mode.fullscreen==p_enabled)
-		return;
+Error OS_Windows::close_dynamic_library(void *p_library_handle) {
+	if (!FreeLibrary((HMODULE)p_library_handle)) {
+		return FAILED;
+	}
+	return OK;
+}
 
-
-
-	if (p_enabled) {
-
-
-		if (pre_fs_valid) {
-			GetWindowRect(hWnd,&pre_fs_rect);
-			//print_line("A: "+itos(pre_fs_rect.left)+","+itos(pre_fs_rect.top)+","+itos(pre_fs_rect.right-pre_fs_rect.left)+","+itos(pre_fs_rect.bottom-pre_fs_rect.top));
-			//MapWindowPoints(hWnd, GetParent(hWnd), (LPPOINT) &pre_fs_rect, 2);
-			//print_line("B: "+itos(pre_fs_rect.left)+","+itos(pre_fs_rect.top)+","+itos(pre_fs_rect.right-pre_fs_rect.left)+","+itos(pre_fs_rect.bottom-pre_fs_rect.top));
-		}
-
-
-		int cs = get_current_screen();
-		Point2 pos = get_screen_position(cs);
-		Size2 size = get_screen_size(cs);
-
-	/*	r.left = pos.x;
-		r.top = pos.y;
-		r.bottom = pos.y+size.y;
-		r.right = pos.x+size.x;
-*/
-		SetWindowLongPtr(hWnd, GWL_STYLE,
-		    WS_SYSMENU | WS_POPUP | WS_CLIPCHILDREN | WS_CLIPSIBLINGS | WS_VISIBLE);
-		MoveWindow(hWnd, pos.x, pos.y, size.width, size.height, TRUE);
-
-		video_mode.fullscreen=true;
-
-
-	} else {
-
-		RECT rect;
-
-		if (pre_fs_valid) {
-			rect=pre_fs_rect;
+Error OS_Windows::get_dynamic_library_symbol_handle(void *p_library_handle, const String p_name, void *&p_symbol_handle, bool p_optional) {
+	p_symbol_handle = (void *)GetProcAddress((HMODULE)p_library_handle, p_name.utf8().get_data());
+	if (!p_symbol_handle) {
+		if (!p_optional) {
+			ERR_FAIL_V_MSG(ERR_CANT_RESOLVE, "Can't resolve symbol " + p_name + ", error: " + String::num(GetLastError()) + ".");
 		} else {
-			rect.left=0;
-			rect.right=video_mode.width;
-			rect.top=0;
-			rect.bottom=video_mode.height;
+			return ERR_CANT_RESOLVE;
 		}
-
-
-
-		if (video_mode.resizable) {
-
-			SetWindowLongPtr(hWnd, GWL_STYLE, WS_OVERLAPPEDWINDOW | WS_VISIBLE);
-			//AdjustWindowRect(&rect, WS_OVERLAPPEDWINDOW, FALSE);
-			MoveWindow(hWnd, rect.left, rect.top, rect.right-rect.left, rect.bottom-rect.top, TRUE);
-		} else {
-
-			SetWindowLongPtr(hWnd, GWL_STYLE, WS_CAPTION | WS_POPUPWINDOW | WS_VISIBLE);
-			//AdjustWindowRect(&rect, WS_CAPTION | WS_POPUPWINDOW, FALSE);
-			MoveWindow(hWnd, rect.left, rect.top, rect.right-rect.left, rect.bottom-rect.top, TRUE);
-		}
-
-		video_mode.fullscreen=false;
-		pre_fs_valid=true;
-/*
-		DWORD dwExStyle=WS_EX_APPWINDOW | WS_EX_WINDOWEDGE;
-		DWORD dwStyle=WS_OVERLAPPEDWINDOW;
-		if (!video_mode.resizable) {
-			dwStyle &= ~WS_THICKFRAME;
-			dwStyle &= ~WS_MAXIMIZEBOX;
-		}
-		AdjustWindowRectEx(&pre_fs_rect, dwStyle, FALSE, dwExStyle);
-		video_mode.fullscreen=false;
-		video_mode.width=pre_fs_rect.right-pre_fs_rect.left;
-		video_mode.height=pre_fs_rect.bottom-pre_fs_rect.top;
-*/
 	}
-
-	//MoveWindow(hWnd,r.left,r.top,p_size.x,p_size.y,TRUE);
-
-
-}
-bool OS_Windows::is_window_fullscreen() const{
-
-	return video_mode.fullscreen;
-}
-void OS_Windows::set_window_resizable(bool p_enabled){
-
-	if (video_mode.resizable==p_enabled)
-		return;
-/*
-	GetWindowRect(hWnd,&pre_fs_rect);
-	DWORD dwExStyle=WS_EX_APPWINDOW | WS_EX_WINDOWEDGE;
-	DWORD dwStyle=WS_OVERLAPPEDWINDOW;
-	if (!p_enabled) {
-		dwStyle &= ~WS_THICKFRAME;
-		dwStyle &= ~WS_MAXIMIZEBOX;
-	}
-	AdjustWindowRectEx(&pre_fs_rect, dwStyle, FALSE, dwExStyle);
-	*/
-
-	if (!video_mode.fullscreen) {
-		if (p_enabled) {
-			SetWindowLongPtr(hWnd, GWL_STYLE, WS_OVERLAPPEDWINDOW | WS_VISIBLE);
-		} else {
-			SetWindowLongPtr(hWnd, GWL_STYLE, WS_CAPTION | WS_MINIMIZEBOX | WS_POPUPWINDOW | WS_VISIBLE);
-
-		}
-
-		RECT rect;
-		GetWindowRect(hWnd,&rect);
-		MoveWindow(hWnd, rect.left, rect.top, rect.right-rect.left, rect.bottom-rect.top, TRUE);
-	}
-
-	video_mode.resizable=p_enabled;
-
-}
-bool OS_Windows::is_window_resizable() const{
-
-	return video_mode.resizable;
-}
-void OS_Windows::set_window_minimized(bool p_enabled){
-
-	if (p_enabled) {
-		maximized=false;
-		minimized=true;
-		ShowWindow(hWnd,SW_MINIMIZE);
-	} else {
-		ShowWindow(hWnd,SW_RESTORE);
-		maximized=false;
-		minimized=false;
-	}
-}
-bool OS_Windows::is_window_minimized() const{
-
-	return minimized;
-
-}
-void OS_Windows::set_window_maximized(bool p_enabled){
-
-	if (p_enabled) {
-		maximized=true;
-		minimized=false;
-		ShowWindow(hWnd,SW_MAXIMIZE);
-	} else {
-		ShowWindow(hWnd,SW_RESTORE);
-		maximized=false;
-		minimized=false;
-	}
-}
-bool OS_Windows::is_window_maximized() const{
-
-	return maximized;
+	return OK;
 }
 
-
-void OS_Windows::set_borderless_window(int p_borderless) {
-	video_mode.borderless_window = p_borderless;
-}
-
-bool OS_Windows::get_borderless_window() {
-	return video_mode.borderless_window;
-}
-
-void OS_Windows::request_attention() {
-
-	FLASHWINFO info;
-	info.cbSize = sizeof(FLASHWINFO);
-	info.hwnd = hWnd;
-	info.dwFlags = FLASHW_TRAY;
-	info.dwTimeout = 0;
-	info.uCount = 2;
-	FlashWindowEx(&info);
-}
-
-void OS_Windows::print_error(const char* p_function, const char* p_file, int p_line, const char* p_code, const char* p_rationale, ErrorType p_type) {
-
-	HANDLE hCon = GetStdHandle(STD_OUTPUT_HANDLE);
-	if (!hCon || hCon == INVALID_HANDLE_VALUE) {
-
-		const char* err_details;
-		if (p_rationale && p_rationale[0])
-			err_details = p_rationale;
-		else
-			err_details = p_code;
-
-		switch(p_type) {
-			case ERR_ERROR:
-				print("ERROR: %s: %s\n", p_function, err_details);
-				print("   At: %s:%i\n", p_file, p_line);
-				break;
-			case ERR_WARNING:
-				print("WARNING: %s: %s\n", p_function, err_details);
-				print("     At: %s:%i\n", p_file, p_line);
-				break;
-			case ERR_SCRIPT:
-				print("SCRIPT ERROR: %s: %s\n", p_function, err_details);
-				print("          At: %s:%i\n", p_file, p_line);
-				break;
-			case ERR_SHADER:
-				print("SHADER ERROR: %s: %s\n", p_function, err_details);
-				print("          At: %s:%i\n", p_file, p_line);
-				break;
-		}
-
-	} else {
-
-		CONSOLE_SCREEN_BUFFER_INFO sbi; //original
-		GetConsoleScreenBufferInfo(hCon, &sbi);
-
-		WORD current_fg = sbi.wAttributes & (FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE | FOREGROUND_INTENSITY);
-		WORD current_bg = sbi.wAttributes & (BACKGROUND_RED | BACKGROUND_GREEN | BACKGROUND_BLUE | BACKGROUND_INTENSITY);
-
-		uint32_t basecol = 0;
-		switch(p_type) {
-			case ERR_ERROR: basecol = FOREGROUND_RED; break;
-			case ERR_WARNING: basecol = FOREGROUND_RED | FOREGROUND_GREEN; break;
-			case ERR_SCRIPT: basecol = FOREGROUND_RED | FOREGROUND_BLUE; break;
-			case ERR_SHADER: basecol = FOREGROUND_GREEN | FOREGROUND_BLUE; break;
-		}
-
-		basecol |= current_bg;
-
-		if (p_rationale && p_rationale[0]) {
-
-			SetConsoleTextAttribute(hCon, basecol | FOREGROUND_INTENSITY);
-			switch(p_type) {
-				case ERR_ERROR: print("ERROR: "); break;
-				case ERR_WARNING: print("WARNING: "); break;
-				case ERR_SCRIPT: print("SCRIPT ERROR: "); break;
-				case ERR_SHADER: print("SHADER ERROR: "); break;
-			}
-
-			SetConsoleTextAttribute(hCon, current_fg | current_bg | FOREGROUND_INTENSITY);
-			print("%s\n", p_rationale);
-
-			SetConsoleTextAttribute(hCon, basecol);
-			switch (p_type) {
-				case ERR_ERROR: print("   At: "); break;
-				case ERR_WARNING: print("     At: "); break;
-				case ERR_SCRIPT: print("          At: "); break;
-				case ERR_SHADER: print("          At: "); break;
-			}
-
-			SetConsoleTextAttribute(hCon, current_fg | current_bg);
-			print("%s:%i\n", p_file, p_line);
-
-		} else {
-
-			SetConsoleTextAttribute(hCon, basecol | FOREGROUND_INTENSITY);
-			switch(p_type) {
-				case ERR_ERROR: print("ERROR: %s: ", p_function); break;
-				case ERR_WARNING: print("WARNING: %s: ", p_function); break;
-				case ERR_SCRIPT: print("SCRIPT ERROR: %s: ", p_function); break;
-				case ERR_SHADER: print("SCRIPT ERROR: %s: ", p_function); break;
-			}
-
-			SetConsoleTextAttribute(hCon, current_fg | current_bg | FOREGROUND_INTENSITY);
-			print("%s\n", p_code);
-
-			SetConsoleTextAttribute(hCon, basecol);
-			switch (p_type) {
-				case ERR_ERROR: print("   At: "); break;
-				case ERR_WARNING: print("     At: "); break;
-				case ERR_SCRIPT: print("          At: "); break;
-				case ERR_SHADER: print("          At: "); break;
-			}
-
-			SetConsoleTextAttribute(hCon, current_fg | current_bg);
-			print("%s:%i\n", p_file, p_line);
-		}
-
-		SetConsoleTextAttribute(hCon, sbi.wAttributes);
-	}
-}
-
-
-String OS_Windows::get_name() {
-
+String OS_Windows::get_name() const {
 	return "Windows";
 }
 
 OS::Date OS_Windows::get_date(bool utc) const {
-
 	SYSTEMTIME systemtime;
 	if (utc)
 		GetSystemTime(&systemtime);
@@ -1811,15 +304,15 @@ OS::Date OS_Windows::get_date(bool utc) const {
 		GetLocalTime(&systemtime);
 
 	Date date;
-	date.day=systemtime.wDay;
-	date.month=Month(systemtime.wMonth);
-	date.weekday=Weekday(systemtime.wDayOfWeek);
-	date.year=systemtime.wYear;
-	date.dst=false;
+	date.day = systemtime.wDay;
+	date.month = Month(systemtime.wMonth);
+	date.weekday = Weekday(systemtime.wDayOfWeek);
+	date.year = systemtime.wYear;
+	date.dst = false;
 	return date;
 }
-OS::Time OS_Windows::get_time(bool utc) const {
 
+OS::Time OS_Windows::get_time(bool utc) const {
 	SYSTEMTIME systemtime;
 	if (utc)
 		GetSystemTime(&systemtime);
@@ -1827,9 +320,9 @@ OS::Time OS_Windows::get_time(bool utc) const {
 		GetLocalTime(&systemtime);
 
 	Time time;
-	time.hour=systemtime.wHour;
-	time.min=systemtime.wMinute;
-	time.sec=systemtime.wSecond;
+	time.hour = systemtime.wHour;
+	time.min = systemtime.wMinute;
+	time.sec = systemtime.wSecond;
 	return time;
 }
 
@@ -1846,592 +339,532 @@ OS::TimeZoneInfo OS_Windows::get_time_zone_info() const {
 		ret.name = info.StandardName;
 	}
 
-	ret.bias = info.Bias;
+	// Bias value returned by GetTimeZoneInformation is inverted of what we expect
+	// For example on GMT-3 GetTimeZoneInformation return a Bias of 180, so invert the value to get -180
+	ret.bias = -info.Bias;
 	return ret;
 }
 
-uint64_t OS_Windows::get_unix_time() const {
+double OS_Windows::get_unix_time() const {
+	// 1 Windows tick is 100ns
+	const uint64_t WINDOWS_TICKS_PER_SECOND = 10000000;
+	const uint64_t TICKS_TO_UNIX_EPOCH = 116444736000000000LL;
 
-	FILETIME ft;
 	SYSTEMTIME st;
 	GetSystemTime(&st);
+	FILETIME ft;
 	SystemTimeToFileTime(&st, &ft);
+	uint64_t ticks_time;
+	ticks_time = ft.dwHighDateTime;
+	ticks_time <<= 32;
+	ticks_time |= ft.dwLowDateTime;
 
-	SYSTEMTIME ep;
-	ep.wYear = 1970;
-	ep.wMonth = 1;
-	ep.wDayOfWeek = 4;
-	ep.wDay = 1;
-	ep.wHour = 0;
-	ep.wMinute = 0;
-	ep.wSecond = 0;
-	ep.wMilliseconds = 0;
-	FILETIME fep;
-	SystemTimeToFileTime(&ep, &fep);
-
-	return (*(uint64_t*)&ft - *(uint64_t*)&fep) / 10000000;
-};
-
-uint64_t OS_Windows::get_system_time_secs() const {
-
-
-	const uint64_t WINDOWS_TICK = 10000000;
-	const uint64_t SEC_TO_UNIX_EPOCH = 11644473600LL;
-
-	SYSTEMTIME st;
-	GetSystemTime(&st);
-	FILETIME ft;
-	SystemTimeToFileTime(&st,&ft);
-	uint64_t ret;
-	ret=ft.dwHighDateTime;
-	ret<<=32;
-	ret|=ft.dwLowDateTime;
-
-	return (uint64_t)(ret / WINDOWS_TICK - SEC_TO_UNIX_EPOCH);
+	return (double)(ticks_time - TICKS_TO_UNIX_EPOCH) / WINDOWS_TICKS_PER_SECOND;
 }
 
 void OS_Windows::delay_usec(uint32_t p_usec) const {
-
-        if (p_usec < 1000)
-                Sleep(1);
-        else
-                Sleep(p_usec / 1000);
-
+	if (p_usec < 1000)
+		Sleep(1);
+	else
+		Sleep(p_usec / 1000);
 }
+
 uint64_t OS_Windows::get_ticks_usec() const {
+	uint64_t ticks;
 
-      	uint64_t ticks;
-        uint64_t time;
-        // This is the number of clock ticks since start
-        if( !QueryPerformanceCounter((LARGE_INTEGER *)&ticks) )
-                ticks = (UINT64)timeGetTime();
-        // Divide by frequency to get the time in seconds
-        time = ticks * 1000000L / ticks_per_second;
-        // Subtract the time at game start to get
-        // the time since the game started
-        time -= ticks_start;
-        return time;
+	// This is the number of clock ticks since start
+	if (!QueryPerformanceCounter((LARGE_INTEGER *)&ticks))
+		ticks = (UINT64)timeGetTime();
+
+	// Divide by frequency to get the time in seconds
+	// original calculation shown below is subject to overflow
+	// with high ticks_per_second and a number of days since the last reboot.
+	// time = ticks * 1000000L / ticks_per_second;
+
+	// we can prevent this by either using 128 bit math
+	// or separating into a calculation for seconds, and the fraction
+	uint64_t seconds = ticks / ticks_per_second;
+
+	// compiler will optimize these two into one divide
+	uint64_t leftover = ticks % ticks_per_second;
+
+	// remainder
+	uint64_t time = (leftover * 1000000L) / ticks_per_second;
+
+	// seconds
+	time += seconds * 1000000L;
+
+	// Subtract the time at game start to get
+	// the time since the game started
+	time -= ticks_start;
+	return time;
 }
 
+String OS_Windows::_quote_command_line_argument(const String &p_text) const {
+	for (int i = 0; i < p_text.size(); i++) {
+		char32_t c = p_text[i];
+		if (c == ' ' || c == '&' || c == '(' || c == ')' || c == '[' || c == ']' || c == '{' || c == '}' || c == '^' || c == '=' || c == ';' || c == '!' || c == '\'' || c == '+' || c == ',' || c == '`' || c == '~') {
+			return "\"" + p_text + "\"";
+		}
+	}
+	return p_text;
+}
 
-void OS_Windows::process_events() {
-
-	MSG msg;
-
-	last_id = joypad->process_joypads(last_id);
-
-	while(PeekMessageW(&msg,NULL,0,0,PM_REMOVE)) {
-
-
-		TranslateMessage(&msg);
-		DispatchMessageW(&msg);
-
+Error OS_Windows::execute(const String &p_path, const List<String> &p_arguments, String *r_pipe, int *r_exitcode, bool read_stderr, Mutex *p_pipe_mutex) {
+	String path = p_path.replace("/", "\\");
+	String command = _quote_command_line_argument(path);
+	for (const List<String>::Element *E = p_arguments.front(); E; E = E->next()) {
+		command += " " + _quote_command_line_argument(E->get());
 	}
 
-	process_key_events();
-
-}
-
-void OS_Windows::set_cursor_shape(CursorShape p_shape) {
-
-	ERR_FAIL_INDEX(p_shape,CURSOR_MAX);
-
-	if (cursor_shape==p_shape)
-		return;
-
-	static const LPCTSTR win_cursors[CURSOR_MAX]={
-		IDC_ARROW,
-		IDC_IBEAM,
-		IDC_HAND,//finger
-		IDC_CROSS,
-		IDC_WAIT,
-		IDC_APPSTARTING,
-		IDC_ARROW,
-		IDC_ARROW,
-		IDC_NO,
-		IDC_SIZENS,
-		IDC_SIZEWE,
-		IDC_SIZENESW,
-		IDC_SIZENWSE,
-		IDC_SIZEALL,
-		IDC_SIZENS,
-		IDC_SIZEWE,
-		IDC_HELP
-	};
-
-	SetCursor(LoadCursor(hInstance,win_cursors[p_shape]));
-	cursor_shape=p_shape;
-}
-
-Error OS_Windows::execute(const String& p_path, const List<String>& p_arguments,bool p_blocking,ProcessID *r_child_id,String* r_pipe,int *r_exitcode) {
-
-	if (p_blocking && r_pipe) {
-
-
-		String argss;
-		argss="\"\""+p_path+"\"";
-
-		for(int i=0;i<p_arguments.size();i++) {
-
-			argss+=String(" \"")+p_arguments[i]+"\"";
+	if (r_pipe) {
+		if (read_stderr) {
+			command += " 2>&1"; // Include stderr
 		}
+		// Add extra quotes around the full command, to prevent it from stripping quotes in the command,
+		// because _wpopen calls command as "cmd.exe /c command", instead of executing it directly
+		command = _quote_command_line_argument(command);
 
-		//print_line("ARGS: "+argss);
-		//argss+"\"";
-		//argss+=" 2>nul";
-
-		FILE* f=_wpopen(argss.c_str(),L"r");
-
-		ERR_FAIL_COND_V(!f,ERR_CANT_OPEN);
-
+		FILE *f = _wpopen((LPCWSTR)(command.utf16().get_data()), L"r");
+		ERR_FAIL_COND_V_MSG(!f, ERR_CANT_OPEN, "Cannot create pipe from command: " + command);
 		char buf[65535];
-		while(fgets(buf,65535,f)) {
-
-			(*r_pipe)+=buf;
+		while (fgets(buf, 65535, f)) {
+			if (p_pipe_mutex) {
+				p_pipe_mutex->lock();
+			}
+			(*r_pipe) += String::utf8(buf);
+			if (p_pipe_mutex) {
+				p_pipe_mutex->unlock();
+			}
 		}
-
 		int rv = _pclose(f);
-		if (r_exitcode)
-			*r_exitcode=rv;
 
+		if (r_exitcode) {
+			*r_exitcode = rv;
+		}
 		return OK;
 	}
 
-	String cmdline = "\""+p_path+"\"";
-	const List<String>::Element* I = p_arguments.front();
-	while (I) {
-
-
-		cmdline += " \""+I->get() + "\"";
-
-		I = I->next();
-	};
-
-	//cmdline+="\"";
-
 	ProcessInfo pi;
-	ZeroMemory( &pi.si, sizeof(pi.si) );
+	ZeroMemory(&pi.si, sizeof(pi.si));
 	pi.si.cb = sizeof(pi.si);
-	ZeroMemory( &pi.pi, sizeof(pi.pi) );
-	LPSTARTUPINFOW si_w = (LPSTARTUPINFOW) &pi.si;
+	ZeroMemory(&pi.pi, sizeof(pi.pi));
+	LPSTARTUPINFOW si_w = (LPSTARTUPINFOW)&pi.si;
 
-	print_line("running cmdline: "+cmdline);
-	Vector<CharType> modstr; //windows wants to change this no idea why
-	modstr.resize(cmdline.size());
-	for(int i=0;i<cmdline.size();i++)
-		modstr[i]=cmdline[i];
-	int ret = CreateProcessW(NULL, modstr.ptr(), NULL, NULL, 0, NORMAL_PRIORITY_CLASS, NULL, NULL, si_w, &pi.pi);
-	ERR_FAIL_COND_V(ret == 0, ERR_CANT_FORK);
+	int ret = CreateProcessW(nullptr, (LPWSTR)(command.utf16().ptrw()), nullptr, nullptr, false, NORMAL_PRIORITY_CLASS & CREATE_NO_WINDOW, nullptr, nullptr, si_w, &pi.pi);
+	ERR_FAIL_COND_V_MSG(ret == 0, ERR_CANT_FORK, "Could not create child process: " + command);
 
-	if (p_blocking) {
+	WaitForSingleObject(pi.pi.hProcess, INFINITE);
+	if (r_exitcode) {
+		DWORD ret2;
+		GetExitCodeProcess(pi.pi.hProcess, &ret2);
+		*r_exitcode = ret2;
+	}
+	CloseHandle(pi.pi.hProcess);
+	CloseHandle(pi.pi.hThread);
 
-		DWORD ret = WaitForSingleObject(pi.pi.hProcess, INFINITE);
-		if (r_exitcode)
-			*r_exitcode=ret;
-
-	} else {
-
-		ProcessID pid = pi.pi.dwProcessId;
-		if (r_child_id) {
-			*r_child_id = pid;
-		};
-		process_map->insert(pid, pi);
-	};
 	return OK;
 };
 
-Error OS_Windows::kill(const ProcessID& p_pid) {
+Error OS_Windows::create_process(const String &p_path, const List<String> &p_arguments, ProcessID *r_child_id) {
+	String path = p_path.replace("/", "\\");
+	String command = _quote_command_line_argument(path);
+	for (const List<String>::Element *E = p_arguments.front(); E; E = E->next()) {
+		command += " " + _quote_command_line_argument(E->get());
+	}
 
-	HANDLE h;
+	ProcessInfo pi;
+	ZeroMemory(&pi.si, sizeof(pi.si));
+	pi.si.cb = sizeof(pi.si);
+	ZeroMemory(&pi.pi, sizeof(pi.pi));
+	LPSTARTUPINFOW si_w = (LPSTARTUPINFOW)&pi.si;
 
-	if (process_map->has(p_pid)) {
-		h = (*process_map)[p_pid].pi.hProcess;
-		process_map->erase(p_pid);
-	} else {
+	int ret = CreateProcessW(nullptr, (LPWSTR)(command.utf16().ptrw()), nullptr, nullptr, false, NORMAL_PRIORITY_CLASS & CREATE_NO_WINDOW, nullptr, nullptr, si_w, &pi.pi);
+	ERR_FAIL_COND_V_MSG(ret == 0, ERR_CANT_FORK, "Could not create child process: " + command);
 
-		ERR_FAIL_COND_V(!process_map->has(p_pid), FAILED);
-	};
+	ProcessID pid = pi.pi.dwProcessId;
+	if (r_child_id) {
+		*r_child_id = pid;
+	}
+	process_map->insert(pid, pi);
 
-	int ret = TerminateProcess(h, 0);
-
-	return ret != 0?OK:FAILED;
+	return OK;
 };
 
-int OS_Windows::get_process_ID() const {
+Error OS_Windows::kill(const ProcessID &p_pid) {
+	ERR_FAIL_COND_V(!process_map->has(p_pid), FAILED);
+
+	const PROCESS_INFORMATION pi = (*process_map)[p_pid].pi;
+	process_map->erase(p_pid);
+
+	const int ret = TerminateProcess(pi.hProcess, 0);
+
+	CloseHandle(pi.hProcess);
+	CloseHandle(pi.hThread);
+
+	return ret != 0 ? OK : FAILED;
+};
+
+int OS_Windows::get_process_id() const {
 	return _getpid();
 }
 
-Error OS_Windows::set_cwd(const String& p_cwd) {
-
-	if (_wchdir(p_cwd.c_str())!=0)
+Error OS_Windows::set_cwd(const String &p_cwd) {
+	if (_wchdir((LPCWSTR)(p_cwd.utf16().get_data())) != 0)
 		return ERR_CANT_OPEN;
 
 	return OK;
 }
 
 String OS_Windows::get_executable_path() const {
-
-	wchar_t bufname[4096];
-	GetModuleFileNameW(NULL,bufname,4096);
-	String s= bufname;
-	print_line("EXEC PATHP??: "+s);
+	WCHAR bufname[4096];
+	GetModuleFileNameW(nullptr, bufname, 4096);
+	String s = String::utf16((const char16_t *)bufname).replace("\\", "/");
 	return s;
 }
 
-void OS_Windows::set_icon(const Image& p_icon) {
-
-
-	Image icon=p_icon;
-	if (icon.get_format()!=Image::FORMAT_RGBA8)
-		icon.convert(Image::FORMAT_RGBA8);
-	int w = icon.get_width();
-	int h = icon.get_height();
-
-	/* Create temporary bitmap buffer */
-	int icon_len = 40 + h * w * 4;
-	Vector<BYTE> v;
-	v.resize(icon_len);
-	BYTE *icon_bmp = &v[0];
-
-	encode_uint32(40,&icon_bmp[0]);
-	encode_uint32(w,&icon_bmp[4]);
-	encode_uint32(h*2,&icon_bmp[8]);
-	encode_uint16(1,&icon_bmp[12]);
-	encode_uint16(32,&icon_bmp[14]);
-	encode_uint32(BI_RGB,&icon_bmp[16]);
-	encode_uint32(w*h*4,&icon_bmp[20]);
-	encode_uint32(0,&icon_bmp[24]);
-	encode_uint32(0,&icon_bmp[28]);
-	encode_uint32(0,&icon_bmp[32]);
-	encode_uint32(0,&icon_bmp[36]);
-
-	uint8_t *wr=&icon_bmp[40];
-	PoolVector<uint8_t>::Read r= icon.get_data().read();
-
-	for(int i=0;i<h;i++) {
-
-		for(int j=0;j<w;j++) {
-
-			const uint8_t *rpx = &r[((h-i-1)*w+j)*4];
-			uint8_t *wpx = &wr[(i*w+j)*4];
-			wpx[0]=rpx[2];
-			wpx[1]=rpx[1];
-			wpx[2]=rpx[0];
-			wpx[3]=rpx[3];
-		}
-	}
-
-
-	HICON hicon = CreateIconFromResource(icon_bmp, icon_len, TRUE, 0x00030000);
-
-	/* Set the icon for the window */
-	SendMessage(hWnd, WM_SETICON, ICON_SMALL, (LPARAM) hicon);
-
-	/* Set the icon in the task manager (should we do this?) */
-	SendMessage(hWnd, WM_SETICON, ICON_BIG, (LPARAM) hicon);
-}
-
-
-bool OS_Windows::has_environment(const String& p_var) const {
-
-	return getenv(p_var.utf8().get_data()) != NULL;
+bool OS_Windows::has_environment(const String &p_var) const {
+#ifdef MINGW_ENABLED
+	return _wgetenv((LPCWSTR)(p_var.utf16().get_data())) != nullptr;
+#else
+	WCHAR *env;
+	size_t len;
+	_wdupenv_s(&env, &len, (LPCWSTR)(p_var.utf16().get_data()));
+	const bool has_env = env != nullptr;
+	free(env);
+	return has_env;
+#endif
 };
 
-String OS_Windows::get_environment(const String& p_var) const {
-
-	wchar_t wval[0x7Fff]; // MSDN says 32767 char is the maximum
-	int wlen = GetEnvironmentVariableW(p_var.c_str(),wval,0x7Fff);
-	if ( wlen > 0 ) {
-		return wval;
+String OS_Windows::get_environment(const String &p_var) const {
+	WCHAR wval[0x7fff]; // MSDN says 32767 char is the maximum
+	int wlen = GetEnvironmentVariableW((LPCWSTR)(p_var.utf16().get_data()), wval, 0x7fff);
+	if (wlen > 0) {
+		return String::utf16((const char16_t *)wval);
 	}
 	return "";
 }
 
-String OS_Windows::get_stdin_string(bool p_block) {
+bool OS_Windows::set_environment(const String &p_var, const String &p_value) const {
+	return (bool)SetEnvironmentVariableW((LPCWSTR)(p_var.utf16().get_data()), (LPCWSTR)(p_value.utf16().get_data()));
+}
 
+String OS_Windows::get_stdin_string(bool p_block) {
 	if (p_block) {
 		char buff[1024];
-		return fgets(buff,1024,stdin);
+		return fgets(buff, 1024, stdin);
 	};
 
 	return String();
 }
 
-
-void OS_Windows::enable_for_stealing_focus(ProcessID pid) {
-
-	AllowSetForegroundWindow(pid);
-
-}
-
-void OS_Windows::move_window_to_foreground() {
-
-	SetForegroundWindow(hWnd);
-
-}
-
 Error OS_Windows::shell_open(String p_uri) {
-
-	ShellExecuteW(NULL, L"open", p_uri.c_str(), NULL, NULL, SW_SHOWNORMAL);
+	ShellExecuteW(nullptr, nullptr, (LPCWSTR)(p_uri.utf16().get_data()), nullptr, nullptr, SW_SHOWNORMAL);
 	return OK;
 }
 
-
 String OS_Windows::get_locale() const {
-
 	const _WinLocale *wl = &_win_locales[0];
 
 	LANGID langid = GetUserDefaultUILanguage();
 	String neutral;
-	int lang = langid&((1<<9)-1);
-	int sublang = langid&~((1<<9)-1);
+	int lang = PRIMARYLANGID(langid);
+	int sublang = SUBLANGID(langid);
 
-	while(wl->locale) {
+	while (wl->locale) {
+		if (wl->main_lang == lang && wl->sublang == SUBLANG_NEUTRAL)
+			neutral = wl->locale;
 
-		if (wl->main_lang==lang && wl->sublang==SUBLANG_NEUTRAL)
-			neutral=wl->locale;
-
-		if (lang==wl->main_lang && sublang==wl->sublang)
-			return wl->locale;
-
+		if (lang == wl->main_lang && sublang == wl->sublang)
+			return String(wl->locale).replace("-", "_");
 
 		wl++;
 	}
 
-	if (neutral!="")
-		return neutral;
+	if (neutral != "")
+		return String(neutral).replace("-", "_");
 
 	return "en";
 }
 
+// We need this because GetSystemInfo() is unreliable on WOW64
+// see https://msdn.microsoft.com/en-us/library/windows/desktop/ms724381(v=vs.85).aspx
+// Taken from MSDN
+typedef BOOL(WINAPI *LPFN_ISWOW64PROCESS)(HANDLE, PBOOL);
+LPFN_ISWOW64PROCESS fnIsWow64Process;
 
-OS::LatinKeyboardVariant OS_Windows::get_latin_keyboard_variant() const {
-	
-	unsigned long azerty[] = { 
-		0x00020401, // Arabic (102) AZERTY
-		0x0001080c, // Belgian (Comma)
-		0x0000080c, // Belgian French
-		0x0000040c, // French
-		0 // <--- STOP MARK
-	};
-	unsigned long qwertz[] = {
-		0x0000041a, // Croation
-		0x00000405, // Czech
-		0x00000407, // German
-		0x00010407, // German (IBM)
-		0x0000040e, // Hungarian
-		0x0000046e, // Luxembourgish
-		0x00010415, // Polish (214)
-		0x00000418, // Romanian (Legacy)
-		0x0000081a, // Serbian (Latin)
-		0x0000041b, // Slovak
-		0x00000424, // Slovenian
-		0x0001042e, // Sorbian Extended
-		0x0002042e, // Sorbian Standard
-		0x0000042e, // Sorbian Standard (Legacy)
-		0x0000100c, // Swiss French
-		0x00000807, // Swiss German
-		0 // <--- STOP MARK
-	};
-	unsigned long dvorak[] = {
-		0x00010409, // US-Dvorak
-		0x00030409, // US-Dvorak for left hand
-		0x00040409, // US-Dvorak for right hand
-		0 // <--- STOP MARK
-	};
+BOOL is_wow64() {
+	BOOL wow64 = FALSE;
 
-	char name[ KL_NAMELENGTH + 1 ]; name[0] = 0;
-	GetKeyboardLayoutNameA( name );
+	fnIsWow64Process = (LPFN_ISWOW64PROCESS)GetProcAddress(GetModuleHandle(TEXT("kernel32")), "IsWow64Process");
 
-	unsigned long hex = strtoul(name, NULL, 16);
-
-	int i=0;
-	while( azerty[i] != 0 ) {
-		if (azerty[i] == hex) return LATIN_KEYBOARD_AZERTY;
-		i++;
-	}
-
-	i = 0;
-	while( qwertz[i] != 0 ) {
-		if (qwertz[i] == hex) return LATIN_KEYBOARD_QWERTZ;
-		i++;
-	}
-	
-	i = 0;
-	while( dvorak[i] != 0 ) {
-		if (dvorak[i] == hex) return LATIN_KEYBOARD_DVORAK;
-		i++; 
-	}
-
-	return LATIN_KEYBOARD_QWERTY;
-}
-
-void OS_Windows::release_rendering_thread() {
-
-	gl_context->release_current();
-
-}
-
-void OS_Windows::make_rendering_thread() {
-
-	gl_context->make_current();
-}
-
-void OS_Windows::swap_buffers() {
-
-	gl_context->swap_buffers();
-}
-
-
-void OS_Windows::run() {
-
-	if (!main_loop)
-		return;
-
-	main_loop->init();
-
-	uint64_t last_ticks=get_ticks_usec();
-
-	int frames=0;
-	uint64_t frame=0;
-
-	while (!force_quit) {
-
-		process_events(); // get rid of pending events
-		if (Main::iteration()==true)
-			break;
-	};
-
-	main_loop->finish();
-
-}
-
-
-
-MainLoop *OS_Windows::get_main_loop() const {
-
-	return main_loop;
-}
-
-String OS_Windows::get_system_dir(SystemDir p_dir) const {
-
-
-	int id;
-
-
-
-	switch(p_dir) {
-		case SYSTEM_DIR_DESKTOP: {
-			id=CSIDL_DESKTOPDIRECTORY;
-		} break;
-		case SYSTEM_DIR_DCIM: {
-			id=CSIDL_MYPICTURES;
-		} break;
-		case SYSTEM_DIR_DOCUMENTS: {
-			id=CSIDL_PERSONAL;
-		} break;
-		case SYSTEM_DIR_DOWNLOADS: {
-			id=0x000C ;
-		} break;
-		case SYSTEM_DIR_MOVIES: {
-			id=CSIDL_MYVIDEO;
-		} break;
-		case SYSTEM_DIR_MUSIC: {
-			id=CSIDL_MYMUSIC;
-		} break;
-		case SYSTEM_DIR_PICTURES: {
-			id=CSIDL_MYPICTURES;
-		} break;
-		case SYSTEM_DIR_RINGTONES: {
-			id=CSIDL_MYMUSIC;
-		} break;
-	}
-
-	WCHAR szPath[MAX_PATH];
-	HRESULT res = SHGetFolderPathW(NULL,id,NULL,0,szPath);
-	ERR_FAIL_COND_V(res!=S_OK,String());
-	return String(szPath);
-
-}
-String OS_Windows::get_data_dir() const {
-
-	String an = get_safe_application_name();
-	if (an!="") {
-
-		if (has_environment("APPDATA")) {
-
-			bool use_godot = GlobalConfig::get_singleton()->get("application/use_shared_user_dir");
-			if (!use_godot)
-				return (OS::get_singleton()->get_environment("APPDATA")+"/"+an).replace("\\","/");
-			else
-				return (OS::get_singleton()->get_environment("APPDATA")+"/Godot/app_userdata/"+an).replace("\\","/");
+	if (fnIsWow64Process) {
+		if (!fnIsWow64Process(GetCurrentProcess(), &wow64)) {
+			wow64 = FALSE;
 		}
 	}
 
-	return GlobalConfig::get_singleton()->get_resource_path();
-
-
+	return wow64;
 }
 
-bool OS_Windows::is_joy_known(int p_device) {
-	return input->is_joy_mapped(p_device);
+int OS_Windows::get_processor_count() const {
+	SYSTEM_INFO sysinfo;
+	if (is_wow64())
+		GetNativeSystemInfo(&sysinfo);
+	else
+		GetSystemInfo(&sysinfo);
+
+	return sysinfo.dwNumberOfProcessors;
 }
 
-String OS_Windows::get_joy_guid(int p_device) const {
-	return input->get_joy_guid_remapped(p_device);
+void OS_Windows::run() {
+	if (!main_loop)
+		return;
+
+	main_loop->initialize();
+
+	while (!force_quit) {
+		DisplayServer::get_singleton()->process_events(); // get rid of pending events
+		if (Main::iteration())
+			break;
+	};
+
+	main_loop->finalize();
 }
 
-void OS_Windows::set_use_vsync(bool p_enable) {
-
-	if (gl_context)
-		gl_context->set_use_vsync(p_enable);
+MainLoop *OS_Windows::get_main_loop() const {
+	return main_loop;
 }
 
-bool OS_Windows::is_vsync_enabled() const{
-
-	if (gl_context)
-		return gl_context->is_using_vsync();
-
-	return true;
+String OS_Windows::get_config_path() const {
+	if (has_environment("XDG_CONFIG_HOME")) { // unlikely, but after all why not?
+		return get_environment("XDG_CONFIG_HOME");
+	} else if (has_environment("APPDATA")) {
+		return get_environment("APPDATA");
+	} else {
+		return ".";
+	}
 }
 
+String OS_Windows::get_data_path() const {
+	if (has_environment("XDG_DATA_HOME")) {
+		return get_environment("XDG_DATA_HOME");
+	} else {
+		return get_config_path();
+	}
+}
+
+String OS_Windows::get_cache_path() const {
+	if (has_environment("XDG_CACHE_HOME")) {
+		return get_environment("XDG_CACHE_HOME");
+	} else if (has_environment("TEMP")) {
+		return get_environment("TEMP");
+	} else {
+		return get_config_path();
+	}
+}
+
+// Get properly capitalized engine name for system paths
+String OS_Windows::get_godot_dir_name() const {
+	return String(VERSION_SHORT_NAME).capitalize();
+}
+
+String OS_Windows::get_system_dir(SystemDir p_dir) const {
+	KNOWNFOLDERID id;
+
+	switch (p_dir) {
+		case SYSTEM_DIR_DESKTOP: {
+			id = FOLDERID_Desktop;
+		} break;
+		case SYSTEM_DIR_DCIM: {
+			id = FOLDERID_Pictures;
+		} break;
+		case SYSTEM_DIR_DOCUMENTS: {
+			id = FOLDERID_Documents;
+		} break;
+		case SYSTEM_DIR_DOWNLOADS: {
+			id = FOLDERID_Downloads;
+		} break;
+		case SYSTEM_DIR_MOVIES: {
+			id = FOLDERID_Videos;
+		} break;
+		case SYSTEM_DIR_MUSIC: {
+			id = FOLDERID_Music;
+		} break;
+		case SYSTEM_DIR_PICTURES: {
+			id = FOLDERID_Pictures;
+		} break;
+		case SYSTEM_DIR_RINGTONES: {
+			id = FOLDERID_Music;
+		} break;
+	}
+
+	PWSTR szPath;
+	HRESULT res = SHGetKnownFolderPath(id, 0, nullptr, &szPath);
+	ERR_FAIL_COND_V(res != S_OK, String());
+	String path = String::utf16((const char16_t *)szPath);
+	CoTaskMemFree(szPath);
+	return path;
+}
+
+String OS_Windows::get_user_data_dir() const {
+	String appname = get_safe_dir_name(ProjectSettings::get_singleton()->get("application/config/name"));
+	if (appname != "") {
+		bool use_custom_dir = ProjectSettings::get_singleton()->get("application/config/use_custom_user_dir");
+		if (use_custom_dir) {
+			String custom_dir = get_safe_dir_name(ProjectSettings::get_singleton()->get("application/config/custom_user_dir_name"), true);
+			if (custom_dir == "") {
+				custom_dir = appname;
+			}
+			return get_data_path().plus_file(custom_dir).replace("\\", "/");
+		} else {
+			return get_data_path().plus_file(get_godot_dir_name()).plus_file("app_userdata").plus_file(appname).replace("\\", "/");
+		}
+	}
+
+	return ProjectSettings::get_singleton()->get_resource_path();
+}
+
+String OS_Windows::get_unique_id() const {
+	HW_PROFILE_INFO HwProfInfo;
+	ERR_FAIL_COND_V(!GetCurrentHwProfile(&HwProfInfo), "");
+	return String::utf16((const char16_t *)(HwProfInfo.szHwProfileGuid), HW_PROFILE_GUIDLEN);
+}
+
+bool OS_Windows::_check_internal_feature_support(const String &p_feature) {
+	return p_feature == "pc";
+}
+
+void OS_Windows::disable_crash_handler() {
+	crash_handler.disable();
+}
+
+bool OS_Windows::is_disable_crash_handler() const {
+	return crash_handler.is_disabled();
+}
+
+Error OS_Windows::move_to_trash(const String &p_path) {
+	SHFILEOPSTRUCTW sf;
+
+	Char16String utf16 = p_path.utf16();
+	WCHAR *from = new WCHAR[utf16.length() + 2];
+	wcscpy_s(from, utf16.length() + 1, (LPCWSTR)(utf16.get_data()));
+	from[utf16.length() + 1] = 0;
+
+	sf.hwnd = main_window;
+	sf.wFunc = FO_DELETE;
+	sf.pFrom = from;
+	sf.pTo = nullptr;
+	sf.fFlags = FOF_ALLOWUNDO | FOF_NOCONFIRMATION;
+	sf.fAnyOperationsAborted = FALSE;
+	sf.hNameMappings = nullptr;
+	sf.lpszProgressTitle = nullptr;
+
+	int ret = SHFileOperationW(&sf);
+	delete[] from;
+
+	if (ret) {
+		ERR_PRINT("SHFileOperation error: " + itos(ret));
+		return FAILED;
+	}
+
+	return OK;
+}
+
+int OS_Windows::get_tablet_driver_count() const {
+	return tablet_drivers.size();
+}
+
+String OS_Windows::get_tablet_driver_name(int p_driver) const {
+	if (p_driver < 0 || p_driver >= tablet_drivers.size()) {
+		return "";
+	} else {
+		return tablet_drivers[p_driver];
+	}
+}
+
+String OS_Windows::get_current_tablet_driver() const {
+	return tablet_driver;
+}
+
+void OS_Windows::set_current_tablet_driver(const String &p_driver) {
+	if (get_tablet_driver_count() == 0) {
+		return;
+	}
+	bool found = false;
+	for (int i = 0; i < get_tablet_driver_count(); i++) {
+		if (p_driver == get_tablet_driver_name(i)) {
+			found = true;
+		}
+	}
+	if (found) {
+		if (DisplayServerWindows::get_singleton()) {
+			((DisplayServerWindows *)DisplayServerWindows::get_singleton())->_update_tablet_ctx(tablet_driver, p_driver);
+		}
+		tablet_driver = p_driver;
+	} else {
+		ERR_PRINT("Unknown tablet driver " + p_driver + ".");
+	}
+}
 
 OS_Windows::OS_Windows(HINSTANCE _hInstance) {
+	ticks_per_second = 0;
+	ticks_start = 0;
+	main_loop = nullptr;
+	process_map = nullptr;
 
-	key_event_pos=0;
-	force_quit=false;
-	alt_mem=false;
-	gr_mem=false;
-	shift_mem=false;
-	control_mem=false;
-	meta_mem=false;
-	minimized = false;
+	//Note: Wacom WinTab driver API for pen input, for devices incompatible with Windows Ink.
+	HMODULE wintab_lib = LoadLibraryW(L"wintab32.dll");
+	if (wintab_lib) {
+		DisplayServerWindows::wintab_WTOpen = (WTOpenPtr)GetProcAddress(wintab_lib, "WTOpenW");
+		DisplayServerWindows::wintab_WTClose = (WTClosePtr)GetProcAddress(wintab_lib, "WTClose");
+		DisplayServerWindows::wintab_WTInfo = (WTInfoPtr)GetProcAddress(wintab_lib, "WTInfoW");
+		DisplayServerWindows::wintab_WTPacket = (WTPacketPtr)GetProcAddress(wintab_lib, "WTPacket");
+		DisplayServerWindows::wintab_WTEnable = (WTEnablePtr)GetProcAddress(wintab_lib, "WTEnable");
 
-	hInstance=_hInstance;
-	pressrc=0;
-	old_invalid=true;
-	last_id=0;
-	mouse_mode=MOUSE_MODE_VISIBLE;
+		DisplayServerWindows::wintab_available = DisplayServerWindows::wintab_WTOpen && DisplayServerWindows::wintab_WTClose && DisplayServerWindows::wintab_WTInfo && DisplayServerWindows::wintab_WTPacket && DisplayServerWindows::wintab_WTEnable;
+	}
+
+	if (DisplayServerWindows::wintab_available) {
+		tablet_drivers.push_back("wintab");
+	}
+
+	//Note: Windows Ink API for pen input, available on Windows 8+ only.
+	HMODULE user32_lib = LoadLibraryW(L"user32.dll");
+	if (user32_lib) {
+		DisplayServerWindows::win8p_GetPointerType = (GetPointerTypePtr)GetProcAddress(user32_lib, "GetPointerType");
+		DisplayServerWindows::win8p_GetPointerPenInfo = (GetPointerPenInfoPtr)GetProcAddress(user32_lib, "GetPointerPenInfo");
+
+		DisplayServerWindows::winink_available = DisplayServerWindows::win8p_GetPointerType && DisplayServerWindows::win8p_GetPointerPenInfo;
+	}
+
+	if (DisplayServerWindows::winink_available) {
+		tablet_drivers.push_back("winink");
+	}
+
+	force_quit = false;
+
+	hInstance = _hInstance;
 #ifdef STDOUT_FILE
-	stdo=fopen("stdout.txt","wb");
+	stdo = fopen("stdout.txt", "wb");
 #endif
-	user_proc = NULL;
 
-#ifdef RTAUDIO_ENABLED
-	AudioDriverManager::add_driver(&driver_rtaudio);
+#ifdef WASAPI_ENABLED
+	AudioDriverManager::add_driver(&driver_wasapi);
 #endif
 #ifdef XAUDIO2_ENABLED
 	AudioDriverManager::add_driver(&driver_xaudio2);
 #endif
 
+	DisplayServerWindows::register_windows_driver();
+
+	Vector<Logger *> loggers;
+	loggers.push_back(memnew(WindowsTerminalLogger));
+	_set_logger(memnew(CompositeLogger(loggers)));
 }
 
-
-OS_Windows::~OS_Windows()
-{
+OS_Windows::~OS_Windows() {
 #ifdef STDOUT_FILE
 	fclose(stdo);
 #endif
 }
-
-

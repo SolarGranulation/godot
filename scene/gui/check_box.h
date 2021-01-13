@@ -1,11 +1,12 @@
 /*************************************************************************/
-/*  check_box.h                                                       */
+/*  check_box.h                                                          */
 /*************************************************************************/
 /*                       This file is part of:                           */
 /*                           GODOT ENGINE                                */
-/*                    http://www.godotengine.org                         */
+/*                      https://godotengine.org                          */
 /*************************************************************************/
-/* Copyright (c) 2007-2017 Juan Linietsky, Ariel Manzur.                 */
+/* Copyright (c) 2007-2021 Juan Linietsky, Ariel Manzur.                 */
+/* Copyright (c) 2014-2021 Godot Engine contributors (cf. AUTHORS.md).   */
 /*                                                                       */
 /* Permission is hereby granted, free of charge, to any person obtaining */
 /* a copy of this software and associated documentation files (the       */
@@ -26,30 +27,27 @@
 /* TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE     */
 /* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                */
 /*************************************************************************/
+
 #ifndef CHECK_BOX_H
 #define CHECK_BOX_H
-
 
 #include "scene/gui/button.h"
 /**
 @author Mariano Suligoy <marianognu.esyrpg@gmail.com>
 */
 class CheckBox : public Button {
-
-    GDCLASS( CheckBox, Button );
-
+	GDCLASS(CheckBox, Button);
 
 protected:
-    void _notification(int p_what);
+	Size2 get_icon_size() const;
+	Size2 get_minimum_size() const override;
+	void _notification(int p_what);
 
-    bool is_radio();
-
+	bool is_radio();
 
 public:
-
-    CheckBox(const String& p_text=String());
-    ~CheckBox();
-
+	CheckBox(const String &p_text = String());
+	~CheckBox();
 };
 
 #endif

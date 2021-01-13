@@ -3,9 +3,10 @@
 /*************************************************************************/
 /*                       This file is part of:                           */
 /*                           GODOT ENGINE                                */
-/*                    http://www.godotengine.org                         */
+/*                      https://godotengine.org                          */
 /*************************************************************************/
-/* Copyright (c) 2007-2017 Juan Linietsky, Ariel Manzur.                 */
+/* Copyright (c) 2007-2021 Juan Linietsky, Ariel Manzur.                 */
+/* Copyright (c) 2014-2021 Godot Engine contributors (cf. AUTHORS.md).   */
 /*                                                                       */
 /* Permission is hereby granted, free of charge, to any person obtaining */
 /* a copy of this software and associated documentation files (the       */
@@ -26,40 +27,48 @@
 /* TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE     */
 /* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                */
 /*************************************************************************/
+
 #ifndef CONTEXT_GL_OSX_H
 #define CONTEXT_GL_OSX_H
 
-/**
-	@author Juan Linietsky <reduzio@gmail.com>
-*/
-#ifdef OSX_ENABLED
+#if defined(OPENGL_ENABLED) || defined(GLES_ENABLED)
 
-#if defined(OPENGL_ENABLED) || defined(LEGACYGL_ENABLED)
+#include "core/error/error_list.h"
+#include "core/os/os.h"
 
-#include "os/os.h"
-#include "drivers/gl_context/context_gl.h"
-#include <AGL/agl.h>
-#include <Carbon/Carbon.h>
+#include <AppKit/AppKit.h>
+#include <ApplicationServices/ApplicationServices.h>
+#include <CoreVideo/CoreVideo.h>
 
-class ContextGL_OSX : public ContextGL {
+class ContextGL_OSX {
+	bool opengl_3_context;
+	bool use_vsync;
 
-	AGLContext context;
-	WindowRef window;
+	void *framework;
+	id window_view;
+	NSOpenGLPixelFormat *pixelFormat;
+	NSOpenGLContext *context;
 
 public:
+	void release_current();
 
-	virtual void release_current();
-	virtual void make_current();
-	virtual void swap_buffers();
+	void make_current();
+	void update();
 
-	virtual Error initialize();
+	void set_opacity(GLint p_opacity);
 
-	ContextGL_OSX(WindowRef window);
+	int get_window_width();
+	int get_window_height();
+	void swap_buffers();
+
+	Error initialize();
+
+	void set_use_vsync(bool p_use);
+	bool is_using_vsync() const;
+
+	ContextGL_OSX(id p_view, bool p_opengl_3_context);
 	~ContextGL_OSX();
-
 };
-
-#endif
 
 #endif
 #endif

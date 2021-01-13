@@ -3,9 +3,10 @@
 /*************************************************************************/
 /*                       This file is part of:                           */
 /*                           GODOT ENGINE                                */
-/*                    http://www.godotengine.org                         */
+/*                      https://godotengine.org                          */
 /*************************************************************************/
-/* Copyright (c) 2007-2017 Juan Linietsky, Ariel Manzur.                 */
+/* Copyright (c) 2007-2021 Juan Linietsky, Ariel Manzur.                 */
+/* Copyright (c) 2014-2021 Godot Engine contributors (cf. AUTHORS.md).   */
 /*                                                                       */
 /* Permission is hereby granted, free of charge, to any person obtaining */
 /* a copy of this software and associated documentation files (the       */
@@ -26,39 +27,44 @@
 /* TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE     */
 /* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                */
 /*************************************************************************/
+
 #ifndef JOINTS_2D_H
 #define JOINTS_2D_H
 
-
 #include "node_2d.h"
 
-class Joint2D : public Node2D {
+class PhysicsBody2D;
 
-	GDCLASS(Joint2D,Node2D);
+class Joint2D : public Node2D {
+	GDCLASS(Joint2D, Node2D);
 
 	RID joint;
+	RID ba, bb;
 
 	NodePath a;
 	NodePath b;
 	real_t bias;
 
 	bool exclude_from_collision;
-
+	String warning;
 
 protected:
-
-	void _update_joint();
+	void _disconnect_signals();
+	void _body_exit_tree(const ObjectID &p_body_id);
+	void _update_joint(bool p_only_free = false);
 
 	void _notification(int p_what);
-	virtual RID _configure_joint()=0;
+	virtual RID _configure_joint(PhysicsBody2D *body_a, PhysicsBody2D *body_b) = 0;
 
 	static void _bind_methods();
-public:
 
-	void set_node_a(const NodePath& p_node_a);
+public:
+	virtual String get_configuration_warning() const override;
+
+	void set_node_a(const NodePath &p_node_a);
 	NodePath get_node_a() const;
 
-	void set_node_b(const NodePath& p_node_b);
+	void set_node_b(const NodePath &p_node_b);
 	NodePath get_node_b() const;
 
 	void set_bias(real_t p_bias);
@@ -69,43 +75,37 @@ public:
 
 	RID get_joint() const { return joint; }
 	Joint2D();
-
 };
 
-
 class PinJoint2D : public Joint2D {
-
-	GDCLASS(PinJoint2D,Joint2D);
+	GDCLASS(PinJoint2D, Joint2D);
 
 	real_t softness;
 
 protected:
-
 	void _notification(int p_what);
-	virtual RID _configure_joint();
+	virtual RID _configure_joint(PhysicsBody2D *body_a, PhysicsBody2D *body_b) override;
 	static void _bind_methods();
-public:
 
-	void set_softness(real_t p_stiffness);
+public:
+	void set_softness(real_t p_softness);
 	real_t get_softness() const;
 
 	PinJoint2D();
 };
 
 class GrooveJoint2D : public Joint2D {
-
-	GDCLASS(GrooveJoint2D,Joint2D);
+	GDCLASS(GrooveJoint2D, Joint2D);
 
 	real_t length;
 	real_t initial_offset;
 
 protected:
-
 	void _notification(int p_what);
-	virtual RID _configure_joint();
+	virtual RID _configure_joint(PhysicsBody2D *body_a, PhysicsBody2D *body_b) override;
 	static void _bind_methods();
-public:
 
+public:
 	void set_length(real_t p_length);
 	real_t get_length() const;
 
@@ -116,8 +116,7 @@ public:
 };
 
 class DampedSpringJoint2D : public Joint2D {
-
-	GDCLASS(DampedSpringJoint2D,Joint2D);
+	GDCLASS(DampedSpringJoint2D, Joint2D);
 
 	real_t stiffness;
 	real_t damping;
@@ -125,12 +124,11 @@ class DampedSpringJoint2D : public Joint2D {
 	real_t length;
 
 protected:
-
 	void _notification(int p_what);
-	virtual RID _configure_joint();
+	virtual RID _configure_joint(PhysicsBody2D *body_a, PhysicsBody2D *body_b) override;
 	static void _bind_methods();
-public:
 
+public:
 	void set_length(real_t p_length);
 	real_t get_length() const;
 
@@ -145,6 +143,5 @@ public:
 
 	DampedSpringJoint2D();
 };
-
 
 #endif // JOINTS_2D_H

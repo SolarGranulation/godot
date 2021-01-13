@@ -3,9 +3,10 @@
 /*************************************************************************/
 /*                       This file is part of:                           */
 /*                           GODOT ENGINE                                */
-/*                    http://www.godotengine.org                         */
+/*                      https://godotengine.org                          */
 /*************************************************************************/
-/* Copyright (c) 2007-2017 Juan Linietsky, Ariel Manzur.                 */
+/* Copyright (c) 2007-2021 Juan Linietsky, Ariel Manzur.                 */
+/* Copyright (c) 2014-2021 Godot Engine contributors (cf. AUTHORS.md).   */
 /*                                                                       */
 /* Permission is hereby granted, free of charge, to any person obtaining */
 /* a copy of this software and associated documentation files (the       */
@@ -26,31 +27,37 @@
 /* TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE     */
 /* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                */
 /*************************************************************************/
+
 #ifndef ANIMATION_CACHE_H
 #define ANIMATION_CACHE_H
 
+#include "scene/3d/skeleton_3d.h"
 #include "scene/resources/animation.h"
-#include "scene/3d/skeleton.h"
 
 class AnimationCache : public Object {
-
-	GDCLASS(AnimationCache,Object);
+	GDCLASS(AnimationCache, Object);
 
 	struct Path {
-
 		RES resource;
 		Object *object;
-		Skeleton *skeleton; // haxor
+		Skeleton3D *skeleton; // haxor
 		Node *node;
-		Spatial *spatial;
+		Node3D *spatial;
 
 		int bone_idx;
-		StringName property;
+		Vector<StringName> subpath;
 		bool valid;
-		Path() { object=NULL; skeleton=NULL; node=NULL; bone_idx=-1; valid=false; spatial=NULL; }
+		Path() {
+			object = nullptr;
+			skeleton = nullptr;
+			node = nullptr;
+			bone_idx = -1;
+			valid = false;
+			spatial = nullptr;
+		}
 	};
 
-	Set<Node*> connected_nodes;
+	Set<Node *> connected_nodes;
 	Vector<Path> path_cache;
 
 	Node *root;
@@ -65,19 +72,17 @@ class AnimationCache : public Object {
 	void _animation_changed();
 
 protected:
-
 	static void _bind_methods();
 
 public:
+	void set_track_transform(int p_idx, const Transform &p_transform);
+	void set_track_value(int p_idx, const Variant &p_value);
+	void call_track(int p_idx, const StringName &p_method, const Variant **p_args, int p_argcount, Callable::CallError &r_error);
 
-	void set_track_transform(int p_idx,const Transform& p_transform);
-	void set_track_value(int p_idx,const Variant& p_value);
-	void call_track(int p_idx,const StringName& p_method,const Variant** p_args,int p_argcount,Variant::CallError &r_error);
+	void set_all(float p_time, float p_delta = 0);
 
-	void set_all(float p_time, float p_delta=0);
-
-	void set_animation(const Ref<Animation>& p_animation);
-	void set_root(Node* p_root);
+	void set_animation(const Ref<Animation> &p_animation);
+	void set_root(Node *p_root);
 
 	AnimationCache();
 };

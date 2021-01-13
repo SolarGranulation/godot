@@ -3,9 +3,10 @@
 /*************************************************************************/
 /*                       This file is part of:                           */
 /*                           GODOT ENGINE                                */
-/*                    http://www.godotengine.org                         */
+/*                      https://godotengine.org                          */
 /*************************************************************************/
-/* Copyright (c) 2007-2017 Juan Linietsky, Ariel Manzur.                 */
+/* Copyright (c) 2007-2021 Juan Linietsky, Ariel Manzur.                 */
+/* Copyright (c) 2014-2021 Godot Engine contributors (cf. AUTHORS.md).   */
 /*                                                                       */
 /* Permission is hereby granted, free of charge, to any person obtaining */
 /* a copy of this software and associated documentation files (the       */
@@ -26,45 +27,81 @@
 /* TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE     */
 /* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                */
 /*************************************************************************/
+
 #ifndef MUTEX_H
 #define MUTEX_H
 
-#include "error_list.h"
+#include "core/error/error_list.h"
+#include "core/typedefs.h"
 
+#if !defined(NO_THREADS)
 
-/**
- * @class Mutex
- * @author Juan Linietsky
- * Portable Mutex (thread-safe locking) implementation.
- * Mutexes are always recursive ( they don't self-lock in a single thread ).
- * Mutexes can be used with a Lockp object like this, to avoid having to worry about unlocking:
- * Lockp( mutex );
- */
+#include <mutex>
 
-
-class Mutex {
-protected:
-	static Mutex* (*create_func)(bool);
+template <class StdMutexT>
+class MutexImpl {
+	mutable StdMutexT mutex;
 
 public:
+	_ALWAYS_INLINE_ void lock() const {
+		mutex.lock();
+	}
 
-	virtual void lock()=0; ///< Lock the mutex, block if locked by someone else
-	virtual void unlock()=0; ///< Unlock the mutex, let other threads continue
-	virtual Error try_lock()=0; ///< Attempt to lock the mutex, OK on success, ERROR means it can't lock.
+	_ALWAYS_INLINE_ void unlock() const {
+		mutex.unlock();
+	}
 
-	static Mutex * create(bool p_recursive=true); ///< Create a mutex
-
-	virtual ~Mutex();
+	_ALWAYS_INLINE_ Error try_lock() const {
+		return mutex.try_lock() ? OK : ERR_BUSY;
+	}
 };
 
+template <class MutexT>
 class MutexLock {
+	const MutexT &mutex;
 
-	Mutex *mutex;
 public:
+	_ALWAYS_INLINE_ explicit MutexLock(const MutexT &p_mutex) :
+			mutex(p_mutex) {
+		mutex.lock();
+	}
 
-	MutexLock(Mutex* p_mutex) { mutex=p_mutex; if (mutex) mutex->lock(); }
-	~MutexLock() { if (mutex) mutex->unlock(); }
-
+	_ALWAYS_INLINE_ ~MutexLock() {
+		mutex.unlock();
+	}
 };
 
-#endif
+using Mutex = MutexImpl<std::recursive_mutex>; // Recursive, for general use
+using BinaryMutex = MutexImpl<std::mutex>; // Non-recursive, handle with care
+
+extern template class MutexImpl<std::recursive_mutex>;
+extern template class MutexImpl<std::mutex>;
+extern template class MutexLock<MutexImpl<std::recursive_mutex>>;
+extern template class MutexLock<MutexImpl<std::mutex>>;
+
+#else
+
+class FakeMutex {
+	FakeMutex() {}
+};
+
+template <class MutexT>
+class MutexImpl {
+public:
+	_ALWAYS_INLINE_ void lock() const {}
+	_ALWAYS_INLINE_ void unlock() const {}
+	_ALWAYS_INLINE_ Error try_lock() const { return OK; }
+};
+
+template <class MutexT>
+class MutexLock {
+public:
+	explicit MutexLock(const MutexT &p_mutex) {}
+};
+
+using Mutex = MutexImpl<FakeMutex>;
+using BinaryMutex = MutexImpl<FakeMutex>; // Non-recursive, handle with care
+
+#endif // !NO_THREADS
+
+#endif // MUTEX_H

@@ -3,9 +3,10 @@
 /*************************************************************************/
 /*                       This file is part of:                           */
 /*                           GODOT ENGINE                                */
-/*                    http://www.godotengine.org                         */
+/*                      https://godotengine.org                          */
 /*************************************************************************/
-/* Copyright (c) 2007-2017 Juan Linietsky, Ariel Manzur.                 */
+/* Copyright (c) 2007-2021 Juan Linietsky, Ariel Manzur.                 */
+/* Copyright (c) 2014-2021 Godot Engine contributors (cf. AUTHORS.md).   */
 /*                                                                       */
 /* Permission is hereby granted, free of charge, to any person obtaining */
 /* a copy of this software and associated documentation files (the       */
@@ -26,20 +27,21 @@
 /* TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE     */
 /* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                */
 /*************************************************************************/
+
 #include "register_types.h"
 
 #include "video_stream_theora.h"
 
-static ResourceFormatLoaderVideoStreamTheora* theora_stream_loader = NULL;
+static Ref<ResourceFormatLoaderTheora> resource_loader_theora;
 
 void register_theora_types() {
+	resource_loader_theora.instance();
+	ResourceLoader::add_resource_format_loader(resource_loader_theora, true);
 
-	theora_stream_loader = memnew( ResourceFormatLoaderVideoStreamTheora );
-	ResourceLoader::add_resource_format_loader(theora_stream_loader);
 	ClassDB::register_class<VideoStreamTheora>();
 }
 
 void unregister_theora_types() {
-
-	memdelete( theora_stream_loader );
+	ResourceLoader::remove_resource_format_loader(resource_loader_theora);
+	resource_loader_theora.unref();
 }

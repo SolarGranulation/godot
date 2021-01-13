@@ -3,9 +3,10 @@
 /*************************************************************************/
 /*                       This file is part of:                           */
 /*                           GODOT ENGINE                                */
-/*                    http://www.godotengine.org                         */
+/*                      https://godotengine.org                          */
 /*************************************************************************/
-/* Copyright (c) 2007-2017 Juan Linietsky, Ariel Manzur.                 */
+/* Copyright (c) 2007-2021 Juan Linietsky, Ariel Manzur.                 */
+/* Copyright (c) 2014-2021 Godot Engine contributors (cf. AUTHORS.md).   */
 /*                                                                       */
 /* Permission is hereby granted, free of charge, to any person obtaining */
 /* a copy of this software and associated documentation files (the       */
@@ -26,24 +27,17 @@
 /* TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE     */
 /* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                */
 /*************************************************************************/
+
 #ifndef IMAGE_LOADER_JPG_H
 #define IMAGE_LOADER_JPG_H
 
-#include "io/image_loader.h"
+#include "core/io/image_loader.h"
 
-/**
-	@author Juan Linietsky <reduzio@gmail.com>
-*/
 class ImageLoaderJPG : public ImageFormatLoader {
-
-
 public:
-
-	virtual Error load_image(Image *p_image,FileAccess *f);
-	virtual void get_recognized_extensions(List<String> *p_extensions) const;	
+	virtual Error load_image(Ref<Image> p_image, FileAccess *f, bool p_force_linear, float p_scale);
+	virtual void get_recognized_extensions(List<String> *p_extensions) const;
 	ImageLoaderJPG();
 };
-
-
 
 #endif

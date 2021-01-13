@@ -3,9 +3,10 @@
 /*************************************************************************/
 /*                       This file is part of:                           */
 /*                           GODOT ENGINE                                */
-/*                    http://www.godotengine.org                         */
+/*                      https://godotengine.org                          */
 /*************************************************************************/
-/* Copyright (c) 2007-2017 Juan Linietsky, Ariel Manzur.                 */
+/* Copyright (c) 2007-2021 Juan Linietsky, Ariel Manzur.                 */
+/* Copyright (c) 2014-2021 Godot Engine contributors (cf. AUTHORS.md).   */
 /*                                                                       */
 /* Permission is hereby granted, free of charge, to any person obtaining */
 /* a copy of this software and associated documentation files (the       */
@@ -26,25 +27,24 @@
 /* TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE     */
 /* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                */
 /*************************************************************************/
+
 #ifndef RANGE_H
 #define RANGE_H
 
 #include "scene/gui/control.h"
-/**
-	@author Juan Linietsky <reduzio@gmail.com>
-*/
+
 class Range : public Control {
-
-	GDCLASS( Range, Control );
-
+	GDCLASS(Range, Control);
 
 	struct Shared {
-		double val,min,max;
-		double step,page;
+		double val, min, max;
+		double step, page;
 		bool exp_ratio;
-		Set<Range*> owners;
+		bool allow_greater;
+		bool allow_lesser;
+		Set<Range *> owners;
 		void emit_value_changed();
-		void emit_changed(const char *p_what="");
+		void emit_changed(const char *p_what = "");
 	};
 
 	Shared *shared;
@@ -55,17 +55,16 @@ class Range : public Control {
 	void _share(Node *p_range);
 
 	void _value_changed_notify();
-	void _changed_notify(const char *p_what="");
+	void _changed_notify(const char *p_what = "");
 
 protected:
-
 	virtual void _value_changed(double) {}
 
 	static void _bind_methods();
 
 	bool _rounded_values;
-public:
 
+public:
 	void set_value(double p_val);
 	void set_min(double p_min);
 	void set_max(double p_max);
@@ -86,12 +85,19 @@ public:
 	void set_exp_ratio(bool p_enable);
 	bool is_ratio_exp() const;
 
+	void set_allow_greater(bool p_allow);
+	bool is_greater_allowed() const;
+
+	void set_allow_lesser(bool p_allow);
+	bool is_lesser_allowed() const;
+
 	void share(Range *p_range);
 	void unshare();
 
+	virtual String get_configuration_warning() const override;
+
 	Range();
 	~Range();
-
 };
 
 #endif

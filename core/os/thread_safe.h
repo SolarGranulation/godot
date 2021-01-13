@@ -3,9 +3,10 @@
 /*************************************************************************/
 /*                       This file is part of:                           */
 /*                           GODOT ENGINE                                */
-/*                    http://www.godotengine.org                         */
+/*                      https://godotengine.org                          */
 /*************************************************************************/
-/* Copyright (c) 2007-2017 Juan Linietsky, Ariel Manzur.                 */
+/* Copyright (c) 2007-2021 Juan Linietsky, Ariel Manzur.                 */
+/* Copyright (c) 2014-2021 Godot Engine contributors (cf. AUTHORS.md).   */
 /*                                                                       */
 /* Permission is hereby granted, free of charge, to any person obtaining */
 /* a copy of this software and associated documentation files (the       */
@@ -26,57 +27,15 @@
 /* TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE     */
 /* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                */
 /*************************************************************************/
+
 #ifndef THREAD_SAFE_H
 #define THREAD_SAFE_H
 
+#include "core/os/mutex.h"
 
-#include "os/mutex.h"
+#define _THREAD_SAFE_CLASS_ mutable Mutex _thread_safe_;
+#define _THREAD_SAFE_METHOD_ MutexLock _thread_safe_method_(_thread_safe_);
+#define _THREAD_SAFE_LOCK_ _thread_safe_.lock();
+#define _THREAD_SAFE_UNLOCK_ _thread_safe_.unlock();
 
-class ThreadSafe {
-
-	Mutex *mutex;
-public:
-
-	inline void lock() const { if (mutex) mutex->lock(); }
-	inline void unlock() const { if (mutex) mutex->unlock(); }
-
-	ThreadSafe();
-	~ThreadSafe();
-
-};
-
-
-class ThreadSafeMethod {
-
-	const ThreadSafe *_ts;
-public:
-	ThreadSafeMethod(const ThreadSafe *p_ts) {
-
-		_ts=p_ts;
-		_ts->lock();
-	}
-
-	~ThreadSafeMethod() { _ts->unlock(); }
-};
-
-
-#ifndef NO_THREADS
-
-#define _THREAD_SAFE_CLASS_ ThreadSafe __thread__safe__;
-#define _THREAD_SAFE_METHOD_  ThreadSafeMethod __thread_safe_method__(&__thread__safe__);
-#define _THREAD_SAFE_LOCK_ __thread__safe__.lock();
-#define _THREAD_SAFE_UNLOCK_ __thread__safe__.unlock();
-
-#else
-
-#define _THREAD_SAFE_CLASS_
-#define _THREAD_SAFE_METHOD_
-#define _THREAD_SAFE_LOCK_
-#define _THREAD_SAFE_UNLOCK_
-
-#endif
-
-
-
-
-#endif
+#endif // THREAD_SAFE_H

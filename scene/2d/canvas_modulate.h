@@ -3,9 +3,10 @@
 /*************************************************************************/
 /*                       This file is part of:                           */
 /*                           GODOT ENGINE                                */
-/*                    http://www.godotengine.org                         */
+/*                      https://godotengine.org                          */
 /*************************************************************************/
-/* Copyright (c) 2007-2017 Juan Linietsky, Ariel Manzur.                 */
+/* Copyright (c) 2007-2021 Juan Linietsky, Ariel Manzur.                 */
+/* Copyright (c) 2014-2021 Godot Engine contributors (cf. AUTHORS.md).   */
 /*                                                                       */
 /* Permission is hereby granted, free of charge, to any person obtaining */
 /* a copy of this software and associated documentation files (the       */
@@ -26,25 +27,26 @@
 /* TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE     */
 /* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                */
 /*************************************************************************/
+
 #ifndef CANVASMODULATE_H
 #define CANVASMODULATE_H
 
 #include "scene/2d/node_2d.h"
 
 class CanvasModulate : public Node2D {
-
-	GDCLASS(CanvasModulate,Node2D);
+	GDCLASS(CanvasModulate, Node2D);
 
 	Color color;
+
 protected:
 	void _notification(int p_what);
 	static void _bind_methods();
-public:
 
-	void set_color(const Color& p_color);
+public:
+	void set_color(const Color &p_color);
 	Color get_color() const;
 
-	String get_configuration_warning() const;
+	String get_configuration_warning() const override;
 
 	CanvasModulate();
 	~CanvasModulate();

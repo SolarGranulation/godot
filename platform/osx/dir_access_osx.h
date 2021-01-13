@@ -3,9 +3,10 @@
 /*************************************************************************/
 /*                       This file is part of:                           */
 /*                           GODOT ENGINE                                */
-/*                    http://www.godotengine.org                         */
+/*                      https://godotengine.org                          */
 /*************************************************************************/
-/* Copyright (c) 2007-2017 Juan Linietsky, Ariel Manzur.                 */
+/* Copyright (c) 2007-2021 Juan Linietsky, Ariel Manzur.                 */
+/* Copyright (c) 2014-2021 Godot Engine contributors (cf. AUTHORS.md).   */
 /*                                                                       */
 /* Permission is hereby granted, free of charge, to any person obtaining */
 /* a copy of this software and associated documentation files (the       */
@@ -26,31 +27,29 @@
 /* TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE     */
 /* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                */
 /*************************************************************************/
+
 #ifndef DIR_ACCESS_OSX_H
 #define DIR_ACCESS_OSX_H
 
 #if defined(UNIX_ENABLED) || defined(LIBC_FILEIO_ENABLED)
 
-#include <sys/types.h>
-#include <sys/stat.h>
-#include <unistd.h>
 #include <dirent.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <unistd.h>
 
-#include "os/dir_access.h"
+#include "core/os/dir_access.h"
 #include "drivers/unix/dir_access_unix.h"
 
-
-/**
-	@author Juan Linietsky <reduzio@gmail.com>
-*/
 class DirAccessOSX : public DirAccessUnix {
 protected:
+	virtual String fix_unicode_name(const char *p_name) const;
 
-	virtual String fix_unicode_name(const char* p_name) const;
+	virtual int get_drive_count();
+	virtual String get_drive(int p_drive);
 
+	virtual bool is_hidden(const String &p_name);
 };
-
-
 
 #endif //UNIX ENABLED
 #endif
